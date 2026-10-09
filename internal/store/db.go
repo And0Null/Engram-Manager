@@ -59,6 +59,14 @@ func (s *Store) Path() string { return s.path }
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
 
+// DB exposes the underlying *sql.DB for testing and migrations.
+func (s *Store) DB() *sql.DB { return s.db }
+
+// NewForTest wraps an existing *sql.DB for unit tests.
+func NewForTest(db *sql.DB) *Store {
+	return &Store{db: db, path: ":memory:"}
+}
+
 func expandPath(p string) string {
 	if p == "" {
 		p = DefaultPath

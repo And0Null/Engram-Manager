@@ -12,11 +12,12 @@ import (
 
 // healthMsg carries the metrics snapshot into the model.
 type healthMsg struct {
-	health   store.Health
-	dbSize   int64
-	walSize  int64
-	projects []store.ProjectStats
-	err      error
+	health     store.Health
+	dbSize     int64
+	walSize    int64
+	projects   []store.ProjectStats
+	embeddings store.EmbeddingStats
+	err        error
 }
 
 func (m Model) healthCmd() tea.Cmd {
@@ -34,7 +35,8 @@ func (m Model) healthCmd() tea.Cmd {
 		if err != nil {
 			return healthMsg{err: err}
 		}
-		return healthMsg{health: h, dbSize: dbSize, walSize: walSize, projects: projects}
+		emb, _ := st.EmbeddingStats()
+		return healthMsg{health: h, dbSize: dbSize, walSize: walSize, projects: projects, embeddings: emb}
 	}
 }
 
@@ -103,6 +105,13 @@ func (m Model) healthView() string {
 		{"projects", fmt.Sprint(h.Projects)},
 		{"database", fmt.Sprintf("%s (wal: %s)", humanSize(m.dbSize), humanSize(m.walSize))},
 		{"pinned / dupes", fmt.Sprintf("%d pinned · %d duplicate rows", h.PinnedCount, h.DuplicateCount)},
+	}
+	if m.embeddings.Available {
+		rows = append(rows, [2]string{
+			"embeddings",
+			fmt.Sprintf("%d embedded (%.0f%%) · %dd · %d pending",
+				m.embeddings.TotalEmbedded, m.embeddings.CoveragePct, m.embeddings.Dimensions, m.embeddings.PendingCount),
+		})
 	}
 	for _, r := range rows {
 		storeCard.WriteString(fmt.Sprintf("  %s %s\n", styleDim.Render(pad(r[0], 18)), styleMuted.Render(r[1])))

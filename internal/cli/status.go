@@ -5,6 +5,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"engram-manager/internal/store"
 )
@@ -29,6 +30,14 @@ func PrintStatus(out io.Writer, st *store.Store) error {
 	fmt.Fprintf(out, "Memories: %d live (%d total)\n", h.LiveObservations, h.TotalObservations)
 	fmt.Fprintf(out, "Sessions: %d (%d active)\n", h.TotalSessions, h.ActiveSessions)
 	fmt.Fprintf(out, "Prompts:  %d across %d projects\n", h.TotalPrompts, h.Projects)
+	if emb, err := st.EmbeddingStats(); err == nil && emb.Available {
+		modelDisplay := emb.Model
+		if idx := strings.LastIndex(modelDisplay, "/"); idx != -1 {
+			modelDisplay = modelDisplay[idx+1:]
+		}
+		fmt.Fprintf(out, "Vectors:  %d / %d (%.0f%%, %dd %s, %d pending)\n",
+			emb.TotalEmbedded, emb.LiveCount, emb.CoveragePct, emb.Dimensions, modelDisplay, emb.PendingCount)
+	}
 	fmt.Fprintln(out)
 
 	// Concerns

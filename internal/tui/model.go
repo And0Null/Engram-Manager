@@ -67,11 +67,12 @@ type Model struct {
 	apiReady    bool
 
 	// Metrics screen.
-	health    *store.Health
-	projects  []store.ProjectStats
-	dbSize    int64
-	walSize   int64
-	healthErr error
+	health     *store.Health
+	projects   []store.ProjectStats
+	embeddings store.EmbeddingStats
+	dbSize     int64
+	walSize    int64
+	healthErr  error
 
 	// Session panel.
 	sessions       []store.Session
@@ -172,6 +173,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.healthErr = nil
 		m.health, m.projects = &msg.health, msg.projects
+		m.embeddings = msg.embeddings
 		m.dbSize, m.walSize = msg.dbSize, msg.walSize
 		return m, nil
 

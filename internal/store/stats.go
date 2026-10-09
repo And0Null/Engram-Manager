@@ -112,7 +112,7 @@ func (s *Store) Projects() ([]ProjectStats, error) {
 }
 
 func (s *Store) sessionDirectories() (map[string][]string, error) {
-	rows, err := s.db.Query(`SELECT DISTINCT project, directory FROM sessions`)
+	rows, err := s.db.Query(`SELECT DISTINCT project, COALESCE(directory, '') FROM sessions`)
 	if err != nil {
 		return nil, fmt.Errorf("list session directories: %w", err)
 	}
@@ -135,7 +135,7 @@ func (s *Store) Sessions(project string, includeEnded bool, limit int) ([]Sessio
 		limit = 200
 	}
 	q := `
-		SELECT s.id, s.project, s.directory, s.started_at, COALESCE(s.ended_at, ''),
+		SELECT s.id, s.project, COALESCE(s.directory, ''), s.started_at, COALESCE(s.ended_at, ''),
 		       COALESCE(s.summary, ''), COALESCE(s.ownership_mode, ''),
 		       COALESCE(s.runtime_lease_expires_at, ''), COALESCE(s.local_creation_project, ''),
 		       (SELECT COUNT(*) FROM observations o WHERE o.session_id = s.id AND o.deleted_at IS NULL),
@@ -236,3 +236,52 @@ func (s *Store) DBSize() (dbSize, walSize int64, err error) {
 	}
 	return st, walSize, nil
 }
+
+// EmbeddingStats aggregates vector store coverage and model details if the
+// observation_embeddings table exists.
+func (s *Store) EmbeddingStats() (EmbeddingStats, error) {
+	var exists int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='observation_embeddings'`).Scan(&exists)
+	if err != nil || exists == 0 {
+		return EmbeddingStats{Available: false}, nil
+	}
+
+	var stats EmbeddingStats
+	stats.Available = true
+
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM observations WHERE deleted_at IS NULL`).Scan(&stats.LiveCount)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM observation_embeddings`).Scan(&stats.TotalEmbedded)
+	_ = s.db.QueryRow(`
+		SELECT COUNT(*) FROM observations o
+		WHERE o.deleted_at IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM observation_embeddings e WHERE e.observation_id = o.id)
+	`).Scan(&stats.PendingCount)
+
+	var model string
+	var dims int
+	var latest string
+	_ = s.db.QueryRow(`
+		SELECT COALESCE(model, ''), COALESCE(dimensions, 0), COALESCE(MAX(created_at), '')
+		FROM observation_embeddings
+		WHERE model IS NOT NULL AND model <> ''
+		GROUP BY model, dimensions
+		ORDER BY COUNT(*) DESC LIMIT 1
+	`).Scan(&model, &dims, &latest)
+
+	stats.Model = model
+	stats.Dimensions = dims
+	stats.LatestAt = latest
+
+	if stats.LiveCount > 0 {
+		covered := stats.LiveCount - stats.PendingCount
+		if covered < 0 {
+			covered = 0
+		}
+		stats.CoveragePct = float64(covered) / float64(stats.LiveCount) * 100.0
+	} else if stats.TotalEmbedded > 0 {
+		stats.CoveragePct = 100.0
+	}
+
+	return stats, nil
+}
+
