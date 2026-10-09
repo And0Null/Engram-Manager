@@ -214,13 +214,111 @@ func (s *Store) RecentActivity(window time.Duration, limit int) ([]Observation, 
 		limit = 20
 	}
 	cutoff := time.Now().UTC().Add(-window).Format("2006-01-02 15:04:05")
-	rows, err := s.db.Query("SELECT"+obsColumns+obsJoin+`
+	rows, err := s.db.Query("SELECT"+obsColumns+s.obsVectorColumn()+obsJoin+`
 		WHERE o.deleted_at IS NULL AND o.created_at >= ?
 		ORDER BY o.created_at DESC, o.id DESC LIMIT ?`, cutoff, limit)
 	if err != nil {
 		return nil, fmt.Errorf("recent activity: %w", err)
 	}
 	return scanObservations(rows)
+}
+
+// TypeCounts returns live observations per type inside a window, biggest first.
+// A zero window means "all time", which is the distribution the store holds.
+func (s *Store) TypeCounts(window time.Duration) ([]TypeCount, error) {
+	q := `SELECT type, COUNT(*) FROM observations
+		WHERE deleted_at IS NULL AND type IS NOT NULL AND type <> ''`
+	var args []any
+	if window > 0 {
+		q += " AND created_at >= ?"
+		args = append(args, time.Now().UTC().Add(-window).Format(sqliteTimeLayout))
+	}
+	q += " GROUP BY type ORDER BY 2 DESC, 1 ASC"
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("type counts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []TypeCount
+	total := 0
+	for rows.Next() {
+		var tc TypeCount
+		if err := rows.Scan(&tc.Type, &tc.Count); err != nil {
+			return nil, fmt.Errorf("scan type count: %w", err)
+		}
+		total += tc.Count
+		out = append(out, tc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if total > 0 {
+		for i := range out {
+			out[i].Pct = float64(out[i].Count) / float64(total) * 100
+		}
+	}
+	return out, nil
+}
+
+// DailyActivity returns a gap-free series of daily creation counts ending
+// today. Engram stores UTC timestamps, so the series is a UTC calendar and the
+// UI renders it as one rather than guessing a local offset per row.
+func (s *Store) DailyActivity(days int) (DailySeries, error) {
+	var out DailySeries
+	if days <= 0 {
+		days = 30
+	}
+	if days > 90 {
+		days = 90
+	}
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	start := today.AddDate(0, 0, -(days - 1))
+	// The window ends at the start of tomorrow, not at the start of today:
+	// truncating both bounds to midnight would silently drop everything
+	// written so far today, which is the day the reader cares most about.
+	endExclusive := start.AddDate(0, 0, days)
+
+	rows, err := s.db.Query(`
+		SELECT substr(o.created_at, 1, 10) AS d, COUNT(*)
+		FROM observations o
+		WHERE o.deleted_at IS NULL AND o.created_at >= ? AND o.created_at < ?
+		GROUP BY d`, start.Format(sqliteTimeLayout), endExclusive.Format(sqliteTimeLayout))
+	if err != nil {
+		return out, fmt.Errorf("daily activity: %w", err)
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var d string
+		var n int
+		if err := rows.Scan(&d, &n); err != nil {
+			return out, fmt.Errorf("scan daily activity: %w", err)
+		}
+		counts[d] = n
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	out.Days = make([]DailyPoint, 0, days)
+	for i := 0; i < days; i++ {
+		key := start.AddDate(0, 0, i).Format("2006-01-02")
+		n := counts[key]
+		out.Days = append(out.Days, DailyPoint{Date: key, Count: n})
+		out.Total += n
+		if n > 0 {
+			out.ActiveDays++
+		}
+		if n > out.PeakCount {
+			out.PeakCount, out.PeakDate = n, key
+		}
+	}
+	out.AvgPerDay = float64(out.Total) / float64(days)
+	return out, nil
 }
 
 // DBSize returns the on-disk size of the database, its WAL, and their sum.

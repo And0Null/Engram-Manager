@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver: no cgo, so the build stays portable
@@ -18,6 +19,12 @@ const DefaultPath = "~/.engram/engram.db"
 type Store struct {
 	db   *sql.DB
 	path string
+
+	// vectorTable caches whether observation_embeddings exists. The table is
+	// written by local tooling, not by Engram itself, so a store opened before
+	// the first embed must not fail every query.
+	vectorTable     bool
+	vectorTableOnce sync.Once
 }
 
 // Open opens the Engram database read-only.
@@ -65,6 +72,19 @@ func (s *Store) DB() *sql.DB { return s.db }
 // NewForTest wraps an existing *sql.DB for unit tests.
 func NewForTest(db *sql.DB) *Store {
 	return &Store{db: db, path: ":memory:"}
+}
+
+// hasVectorTable reports whether the local vector store is present.
+func (s *Store) hasVectorTable() bool {
+	s.vectorTableOnce.Do(func() {
+		var n int
+		if err := s.db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='observation_embeddings'`,
+		).Scan(&n); err == nil {
+			s.vectorTable = n > 0
+		}
+	})
+	return s.vectorTable
 }
 
 func expandPath(p string) string {

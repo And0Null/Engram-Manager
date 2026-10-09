@@ -25,10 +25,11 @@ Engram-Manager/
 ├── internal/
 │   ├── api/                # HTTP API client for write operations
 │   ├── cli/                # Non-interactive stdout commands (status)
-│   ├── store/              # Read-only SQLite queries, FTS5, relations & metrics
+│   ├── store/              # Read-only SQLite queries, FTS5, relations, metrics, time series
 │   ├── tui/                # Bubbletea terminal interface (2-pane lazygit layout)
 │   └── web/                # Zero-build embedded web server & dashboard SPA
 │       └── static/         # HTML, CSS & vanilla JS (embedded via go:embed)
+├── PRODUCT.md              # Durable product truth behind every UI decision
 ├── bin/                    # Compiled binaries
 ├── go.mod
 └── README.md
@@ -97,14 +98,16 @@ ENGRAM_DASH_PORT=7438 engram-manager web
 
 Open `http://127.0.0.1:7438` in your browser.
 
-- **Embedded & Zero-Dependencies**: Served directly from the Go binary via `go:embed`. No Python, no Node.js, no build step.
+- **Embedded & Zero-Dependencies**: Served directly from the Go binary via `go:embed`. No Python, no Node.js, no build step, no chart library.
 - **Key Views**:
-  - **Overview**: Memory totals, 24h / 7d / 30d activity windows, memory type distribution bars, top projects.
-  - **Memories**: Instant FTS trigram search, filter by project / type / pinned / deleted, and a sliding detail drawer (`#/memories/obs/<id>`) with Markdown view, copy ID, edit, and soft-delete.
-  - **Relaciones & Conflictos**: Knowledge graph relationship explorer (`conflicts_with`, `supersedes`, `related`, `compatible`), confidence scores, and origin/target links.
-  - **Sesiones & Timeline**: Chronological observation timeline and prompt flow per agent session.
-  - **Revisión**: Queue of memories scheduled for verification (`review_after`).
-  - **Sistema & Salud**: DB/WAL storage gauges, store invariant checks, and connection heartbeat with `engram serve`.
+  - **Overview**: A polar radar of the type mix (each memory type owns a permanent hue, so colour is a legend you learn), a windowed readout with proportional type bars, a 30-day activity strip labelled with its average and peak day, vector-store coverage, and a rail of readouts.
+  - **Memories**: Instant FTS trigram search, filter by project / type / pinned / deleted, per-row vector badge, and a sliding detail drawer with Markdown view, copy id, edit and soft-delete.
+  - **Relations**: Relation kinds and the judgement queue side by side, then the most recent links with confidence and the ability to open either end.
+  - **Sessions**: Agent runs with observation counts; selecting one reads its timeline and the prompts behind it.
+  - **Review**: Queue of memories carrying a scheduled review date, with a one-click "mark reviewed".
+  - **System**: Store invariants, vector-store state (model, dimensions, pending, last vector) and how this process is wired.
+- **Time windows**: The Overview window selector (24h / 7d / 30d) is real — every window's type breakdown ships with the payload and the headline always names the window it belongs to.
+- **Responsive**: Below 880px the sidebar folds into a horizontal strip and the instrument takes the full width.
 
 ### 3. Fast CLI Status (Headless)
 Inspect database health and top projects in stdout without opening the interactive TUI:

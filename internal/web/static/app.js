@@ -1,953 +1,1048 @@
-/* Engram Manager — Client Application (Vanilla SPA) */
+/* Engram Manager — dashboard client.
+   No framework, no build step: one namespace, explicit render functions. */
 "use strict";
 
 (function () {
-  // State
+  // ---------------------------------------------------------------- types
+
+  // Each memory type owns a hue for good. Read once from the stylesheet so the
+  // chart and the stylesheet can never drift apart.
+  const TYPE_HUE = {};
+  const CSS_VARS = ["session_summary", "discovery", "config", "bugfix", "decision",
+    "architecture", "preference", "pattern", "learning", "manual"];
+  const FALLBACK_HUE = "#7d8ea0";
+  CSS_VARS.forEach((t) => {
+    TYPE_HUE[t] = getComputedStyle(document.documentElement).getPropertyValue(`--t-${t}`).trim() || FALLBACK_HUE;
+  });
+  const hueOf = (t) => TYPE_HUE[t] || FALLBACK_HUE;
+
+  // ---------------------------------------------------------------- state
+
   const state = {
-    currentView: "overview",
+    view: "overview",
+    window: "7d",
     overview: null,
     health: null,
     memories: [],
-    memoriesFilter: {
-      q: "",
-      project: "",
-      type: "",
-      scope: "",
-      pinned: false,
-      deleted: false,
-      limit: 100,
-      offset: 0,
-    },
+    filter: { q: "", type: "", project: "", pinned: false, deleted: false, limit: 100, offset: 0 },
     relations: [],
     relationsSummary: null,
     sessions: [],
-    selectedSession: null,
-    sessionTimeline: null,
-    selectedMemory: null,
-    editingMemory: false,
+    timeline: null,
+    review: [],
+    memory: null,
+    memoryRelations: [],
+    editing: false,
   };
 
-  // DOM Elements
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const elMainContent = $("#content");
-  const elPageTitle = $("#page-title");
-  const elPageSubtitle = $("#page-subtitle");
-  const elGlobalSearchInput = $("#global-search-input");
-  const elBtnRefresh = $("#btn-refresh");
+  const content = $("#content");
+  const pageTitle = $("[data-page-title]");
+  const pageSub = $("[data-page-sub]");
+  const searchInput = $("[data-search]");
+  const windowSwitch = $("[data-window-switch]");
+  const drawer = $("[data-drawer]");
+  const backdrop = $("[data-drawer-backdrop]");
 
-  const elDrawer = $("#drawer");
-  const elDrawerBackdrop = $("#drawer-backdrop");
-  const elDrawerClose = $("#drawer-close");
-  const elDrawerBody = $("#drawer-body");
-  const elDrawerFooter = $("#drawer-footer");
-  const elDrawerTitle = $("#drawer-title");
-  const elDrawerEyebrow = $("#drawer-eyebrow");
+  // ---------------------------------------------------------------- helpers
 
-  const elEngineDot = $("#engine-dot");
-  const elEngineLabel = $("#engine-label");
-  const elDbSize = $("#db-size-label");
-  const elWalSize = $("#wal-size-label");
+  const esc = (s) => String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-  // Formatters
-  function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KiB", "MiB", "GiB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  const num = (n) => (n ?? 0).toLocaleString("es-ES");
+  const pct = (n) => `${(n ?? 0).toFixed(1)}%`;
+
+  function bytes(n) {
+    if (!n) return "0 B";
+    const u = ["B", "KiB", "MiB", "GiB"];
+    const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+    return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`;
   }
 
-  function formatDate(str) {
-    if (!str) return "—";
-    const d = new Date(str.includes("T") ? str : str.replace(" ", "T") + "Z");
-    if (isNaN(d.getTime())) return str;
-    return d.toLocaleString("es-ES", {
-      dateStyle: "short",
-      timeStyle: "short",
-    });
+  // Engram writes UTC as "YYYY-MM-DD HH:MM:SS".
+  function parseTs(s) {
+    if (!s) return null;
+    const d = new Date(/^\d{4}-\d{2}-\d{2} /.test(s) ? s.replace(" ", "T") + "Z" : s);
+    return isNaN(d.getTime()) ? null : d;
   }
 
-  function escapeHtml(str) {
-    if (!str) return "";
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+  function fmtDate(s) {
+    const d = parseTs(s);
+    return d ? d.toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }) : "—";
   }
 
-  function showToast(message, isError = false) {
-    const container = $("#toast-container");
-    const toast = document.createElement("div");
-    toast.className = `toast ${isError ? "toast-error" : ""}`;
-    toast.textContent = message;
-    container.appendChild(toast);
+  function fmtDay(iso) {
+    const d = parseTs(iso);
+    return d ? d.toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) : iso;
+  }
+
+  function toast(message, kind = "ok") {
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.dataset.kind = kind;
+    el.innerHTML = `<span class="toast-dot"></span><span>${esc(message)}</span>`;
+    $("#toasts").appendChild(el);
     setTimeout(() => {
-      toast.style.opacity = "0";
-      toast.style.transition = "opacity 0.3s";
-      setTimeout(() => toast.remove(), 300);
-    }, 2800);
+      el.classList.add("leaving");
+      setTimeout(() => el.remove(), 260);
+    }, 3000);
   }
 
-  // API calls
   async function api(path, opts = {}) {
-    try {
-      const res = await fetch(path, {
-        headers: opts.body ? { "Content-Type": "application/json" } : {},
-        method: opts.method || "GET",
-        body: opts.body ? JSON.stringify(opts.body) : undefined,
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      return data;
-    } catch (err) {
-      console.error(`API Error [${path}]:`, err);
-      throw err;
-    }
+    const res = await fetch(path, {
+      method: opts.method || "GET",
+      headers: opts.body ? { "Content-Type": "application/json" } : {},
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
   }
 
-  // Engine Status Check
-  async function checkEngineStatus() {
-    try {
-      const data = await api("/api/health");
-      state.health = data.health;
-
-      if (data.api_status === "connected") {
-        elEngineDot.className = "status-dot dot-connected";
-        elEngineLabel.textContent = "Engram Serve: OK";
-      } else {
-        elEngineDot.className = "status-dot dot-unreachable";
-        elEngineLabel.textContent = "Engram Serve: Inactivo";
-      }
-
-      elDbSize.textContent = `DB: ${formatBytes(data.db_size)}`;
-      elWalSize.textContent = `WAL: ${formatBytes(data.wal_size)}`;
-
-      if (data.health) {
-        $("#nav-count-memories").textContent = data.health.LiveObservations || "0";
-        $("#nav-count-sessions").textContent = data.health.TotalSessions || "0";
-      }
-    } catch (err) {
-      elEngineDot.className = "status-dot dot-unreachable";
-      elEngineLabel.textContent = "API error";
-    }
+  function loading(label) {
+    content.innerHTML = `<div class="state"><div class="spinner"></div><p>${esc(label)}</p></div>`;
   }
 
-  // Routing & Views
-  function setView(viewName) {
-    state.currentView = viewName;
-    $$(".nav-item").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.view === viewName);
+  function failed(err, retry) {
+    content.innerHTML = `<div class="state">
+      <h3>Could not load this view</h3>
+      <p>${esc(err.message)}</p>
+      <button class="btn" data-retry>Try again</button>
+    </div>`;
+    const b = $("[data-retry]", content);
+    if (b) b.addEventListener("click", retry);
+  }
+
+  // ---------------------------------------------------------------- radar
+
+    // Polar multi-ring arc fan: all type arcs start together at top-left (280°)
+  // and sweep clockwise on their own concentric ring track by rank.
+  // Match the reference chart's iconic radar sweep fan appearance.
+  function polarToXY(cx, cy, r, deg) {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  }
+
+  function arcPath(cx, cy, r, a0, a1) {
+    if (a1 - a0 >= 359.99) {
+      const mid = a0 + 180;
+      return arcPath(cx, cy, r, a0, mid) + " " + arcPath(cx, cy, r, mid, a0 + 360);
+    }
+    const large = a1 - a0 > 180 ? 1 : 0;
+    const [x0, y0] = polarToXY(cx, cy, r, a0);
+    const [x1, y1] = polarToXY(cx, cy, r, a1);
+    return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 ${large} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  }
+
+  function sectorPath(cx, cy, rIn, rOut, a0, a1) {
+    const large = a1 - a0 > 180 ? 1 : 0;
+    const [x0, y0] = polarToXY(cx, cy, rOut, a0);
+    const [x1, y1] = polarToXY(cx, cy, rOut, a1);
+    const [x2, y2] = polarToXY(cx, cy, rIn, a1);
+    const [x3, y3] = polarToXY(cx, cy, rIn, a0);
+    return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${rOut} ${rOut} 0 ${large} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}
+            L ${x2.toFixed(1)} ${y2.toFixed(1)} A ${rIn} ${rIn} 0 ${large} 0 ${x3.toFixed(1)} ${y3.toFixed(1)} Z`;
+  }
+
+  const RADAR_MAX_RINGS = 8;
+
+  function buildRadar(types, total) {
+    const cx = 150, cy = 150;
+    const rIn = 50, rOut = 138;
+    const step = (rOut - rIn) / (RADAR_MAX_RINGS - 1);
+    const startAngle = 280; // Start top-left baseline
+
+    const ranked = types.slice(0, RADAR_MAX_RINGS - 1);
+    const tail = types.slice(RADAR_MAX_RINGS - 1);
+    if (tail.length) {
+      const n = tail.reduce((a, t) => a + t.count, 0);
+      const share = tail.reduce((a, t) => a + t.pct, 0);
+      ranked.push({ type: `${tail.length} more types`, count: n, pct: share, tail: true });
+    }
+
+    // Concentric grid circles (radar target)
+    let gridRings = "";
+    for (let r = 25; r <= 145; r += 10) {
+      gridRings += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#121e2c" stroke-width="0.8"/>`;
+    }
+
+    // Translucent radar sweep cone behind max arc
+    const maxSweep = Math.max(10, (ranked[0]?.pct || 30) * 3.6);
+    const sweepCone = `<path d="${sectorPath(cx, cy, 20, 142, startAngle, startAngle + maxSweep)}"
+      fill="rgba(45, 212, 191, 0.035)" stroke="rgba(45, 212, 191, 0.12)" stroke-width="0.8"/>`;
+
+    const needlePos = polarToXY(cx, cy, 142, startAngle + maxSweep);
+    const needleLine = `<line x1="${cx}" y1="${cy}" x2="${needlePos[0].toFixed(1)}" y2="${needlePos[1].toFixed(1)}"
+      stroke="rgba(45, 212, 191, 0.35)" stroke-width="1.2" stroke-dasharray="3,3"/>`;
+
+    let tracks = "";
+    let arcs = "";
+
+    ranked.forEach((t, i) => {
+      const r = rOut - i * step; // Rank 0 is outermost ring
+      const sweep = Math.max(3.5, (t.count / total) * 360);
+      const colour = t.tail ? FALLBACK_HUE : hueOf(t.type);
+
+      // Dark background ring track
+      tracks += `<circle class="radar-ring" cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" stroke="#15212f" stroke-width="7" fill="none" opacity="0.6"/>`;
+
+      // Vibrant rounded arc segment starting at baseline
+      const pathD = arcPath(cx, cy, r, startAngle, startAngle + sweep);
+      arcs += `<path class="radar-arc" data-type="${esc(t.type)}"
+        d="${pathD}" stroke="${colour}" stroke-width="7.5" stroke-linecap="round" fill="none" opacity="0.95">
+        <title>${esc(t.type)} — ${num(t.count)} memories · ${pct(t.pct)}</title>
+      </path>`;
     });
 
-    switch (viewName) {
-      case "overview":
-        elPageTitle.textContent = "Overview";
-        elPageSubtitle.textContent = "Panel general de memoria y métricas operativas";
-        loadOverview();
-        break;
-      case "memories":
-        elPageTitle.textContent = "Memories";
-        elPageSubtitle.textContent = "Explorador de observaciones y base de conocimientos";
-        loadMemories();
-        break;
-      case "relations":
-        elPageTitle.textContent = "Relaciones y Conflictos";
-        elPageSubtitle.textContent = "Red de relaciones semánticas entre observaciones";
-        loadRelations();
-        break;
-      case "sessions":
-        elPageTitle.textContent = "Sesiones de Agente";
-        elPageSubtitle.textContent = "Línea de tiempo de sesiones y actividad de contexto";
-        loadSessions();
-        break;
-      case "review":
-        elPageTitle.textContent = "Cola de Revisión";
-        elPageSubtitle.textContent = "Memorias programadas para verificación o caducidad";
-        loadReviewQueue();
-        break;
-      case "system":
-        elPageTitle.textContent = "Sistema & Salud";
-        elPageSubtitle.textContent = "Diagnóstico de invariantes, almacén SQLite y WAL";
-        loadSystem();
-        break;
+    return `<svg class="radar" viewBox="0 0 300 300" role="img"
+        aria-label="Distribution of ${ranked.length} memory types over ${num(total)} memories">
+      ${gridRings}
+      ${sweepCone}
+      ${needleLine}
+      ${tracks}
+      ${arcs}
+      <circle cx="${cx}" cy="${cy}" r="${rIn - 6}" fill="var(--ink-850)" stroke="var(--line)" stroke-width="1.5"/>
+      <text class="radar-hub-value" x="${cx}" y="${cy + 5}" text-anchor="middle">${num(total)}</text>
+      <text class="radar-hub-label" x="${cx}" y="${cy + 21}" text-anchor="middle">OBSERVACIONES</text>
+      <text class="radar-hub-sub" x="${cx}" y="${cy + 33}" text-anchor="middle">${num(total)} activas en total</text>
+    </svg>`;
+  }
+
+  // Hovering an arc, a bar or a legend chip lights the same type everywhere.
+  // One delegated handler, because the three views of the same data are
+  // rendered in the same pass.
+  function wireCrossHighlight() {
+    const marks = $$("[data-type]", content);
+    const paint = (type) => {
+      for (const el of marks) {
+        const hit = type !== null && el.dataset.type === type;
+        el.dataset.hot = hit ? "true" : "false";
+        if (el.classList.contains("radar-arc")) el.dataset.dim = hit ? "false" : "true";
+      }
+    };
+    for (const el of marks) {
+      el.addEventListener("mouseenter", () => paint(el.dataset.type));
+      el.addEventListener("focus", () => paint(el.dataset.type));
+      el.addEventListener("mouseleave", () => paint(null));
+      el.addEventListener("blur", () => paint(null));
     }
   }
 
-  // View: Overview
+  // ---------------------------------------------------------------- pieces
+
+  function typeBars(types, limit = 10) {
+    if (!types.length) return `<p class="sheet-note">No types recorded.</p>`;
+    const shown = types.slice(0, limit);
+    const rest = types.slice(limit);
+    let rows = shown.map((t) => {
+      const w = Math.max(1.5, t.pct);
+      return `<button class="typebar" data-type="${esc(t.type)}">
+        <span class="typebar-label"><i class="legend-swatch" style="background:${hueOf(t.type)}"></i><b>${esc(t.type)}</b></span>
+        <span class="typebar-track"><span class="typebar-fill" style="width:${w}%;background:${hueOf(t.type)}"></span></span>
+        <span class="typebar-num">${num(t.count)} <span>· ${pct(t.pct)}</span></span>
+      </button>`;
+    }).join("");
+    if (rest.length) {
+      const count = rest.reduce((a, t) => a + t.count, 0);
+      const share = rest.reduce((a, t) => a + t.pct, 0);
+      rows += `<div class="typebar" aria-disabled="true">
+        <span class="typebar-label"><i class="legend-swatch" style="background:${FALLBACK_HUE}"></i><b>${rest.length} other types</b></span>
+        <span class="typebar-track"><span class="typebar-fill" style="width:${Math.max(1.5, share)}%;background:${FALLBACK_HUE}"></span></span>
+        <span class="typebar-num">${num(count)} <span>· ${pct(share)}</span></span>
+      </div>`;
+    }
+    return `<div class="typebars">${rows}</div>`;
+  }
+
+  function legendChips(types, limit = 9) {
+    const shown = types.slice(0, limit);
+    const tail = types.slice(limit);
+    const chips = shown.map((t) => `<button class="legend-item" data-type="${esc(t.type)}">
+      <i class="legend-swatch" style="background:${hueOf(t.type)}"></i>
+      <span>${esc(t.type)}</span>
+      <span class="legend-count">${num(t.count)}</span>
+      <span class="legend-pct">${pct(t.pct)}</span>
+    </button>`).join("");
+    if (!tail.length) return chips;
+    // The tail is on its own ring inside the radar; naming it here keeps the
+    // legend honest without listing eleven one-count types.
+    const n = tail.reduce((a, t) => a + t.count, 0);
+    const share = tail.reduce((a, t) => a + t.pct, 0);
+    return chips + `<span class="legend-item" style="cursor:default">
+      <i class="legend-swatch" style="background:${FALLBACK_HUE}"></i>
+      <span>${tail.length} smaller types</span>
+      <span class="legend-count">${num(n)}</span>
+      <span class="legend-pct">${pct(share)}</span>
+    </span>`;
+  }
+
+  // Real daily buckets, newest at the right. Every bar is a day that exists.
+  function activityStrip(days) {
+    if (!days || !days.length) return "";
+    const max = Math.max(1, ...days.map((d) => d.count));
+    return days.map((d) => {
+      const isPeak = d.count === max && d.count > 0;
+      return `<i class="strip-bar" style="height:${Math.max(2, (d.count / max) * 100)}%"
+        data-peak="${isPeak}" title="${esc(fmtDay(d.date))} — ${num(d.count)} memories"></i>`;
+    }).join("");
+  }
+
+  function miniSpark(days, n = 14) {
+    const slice = (days || []).slice(-n);
+    if (!slice.length) return "";
+    const max = Math.max(1, ...slice.map((d) => d.count));
+    return slice.map((d) => `<i style="height:${Math.max(1, (d.count / max) * 100)}%"
+      title="${esc(fmtDay(d.date))} — ${num(d.count)}"></i>`).join("");
+  }
+
+  function shareBars(values, hue) {
+    const max = Math.max(1, ...values.map((v) => v.n));
+    return values.map((v) => `<i style="height:${Math.max(1, (v.n / max) * 100)}%;background:${hue}"
+      title="${esc(v.label)} — ${num(v.n)}"></i>`).join("");
+  }
+
+  // ---------------------------------------------------------------- overview
+
   async function loadOverview() {
-    elMainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando visión general...</span></div>`;
+    loading("Reading the store…");
     try {
-      const data = await api("/api/overview");
-      state.overview = data;
-      renderOverview(data);
+      state.overview = await api("/api/overview");
+      renderOverview();
     } catch (err) {
-      elMainContent.innerHTML = `<div class="empty-state">Error cargando overview: ${escapeHtml(err.message)}</div>`;
+      failed(err, loadOverview);
     }
   }
 
-  function renderOverview(data) {
-    const h = data.health || {};
-    const act = data.activity || {};
-    const rel = data.relations || {};
-    const emb = data.embeddings || {};
-    const projects = data.projects || [];
+  function renderOverview() {
+    const d = state.overview;
+    const h = d.health || {};
+    const act = d.activity || {};
+    const rel = d.relations || {};
+    const emb = d.embeddings || {};
+    const daily = d.daily || { days: [], avg_per_day: 0, peak_count: 0, peak_date: "", active_days: 0, total: 0 };
+    const projects = d.projects || [];
 
-    // Type distribution calculations
-    const typeEntries = Object.entries(act.by_type || {}).sort((a, b) => b[1] - a[1]);
-    const totalTypeCount = typeEntries.reduce((acc, [, val]) => acc + val, 0) || 1;
+    // The type mix shown in the radar is the whole store; the bars answer the
+    // sharper question, "what are we writing right now", over the selected
+    // window. Both windows ship with the payload so switching is instant and
+    // the number on screen always states the window it belongs to.
+    const WINDOW_LABEL = { "24h": "last 24 hours", "7d": "last seven days", "30d": "last thirty days" };
+    const radarTypes = d.types_all || [];
+    const barTypes = (d.types || {})[state.window] || [];
+    const windowTotal = barTypes.reduce((a, t) => a + t.count, 0);
+    const windowLabel = WINDOW_LABEL[state.window] || state.window;
 
-    let typesHtml = "";
-    typeEntries.slice(0, 7).forEach(([t, count]) => {
-      const pct = Math.round((count / totalTypeCount) * 100);
-      typesHtml += `
-        <div class="dist-item">
-          <div class="dist-item-header">
-            <span class="badge badge-${escapeHtml(t)}">${escapeHtml(t)}</span>
-            <span class="mono">${count} (${pct}%)</span>
+    const peakCount = Math.max(0, ...daily.days.map((x) => x.count));
+    const strip = activityStrip(daily.days);
+    const last14 = miniSpark(daily.days);
+    const topProjects = projects.slice(0, 8).map((p) => ({ label: p.Name, n: p.Observations }));
+
+    const vectorPct = emb.available ? emb.coverage_pct : 0;
+
+    content.innerHTML = `
+      <div class="instrument">
+        <section class="panel radar-wrap">
+          <div class="panel-head">
+            <h2 class="panel-title">DISTRIBUCIÓN POR TIPO</h2>
+            <span class="panel-note">${radarTypes.length} TIPOS · ${num(h.LiveObservations || 0)} CARGADAS</span>
           </div>
-          <div class="dist-track">
-            <div class="dist-fill" style="width: ${pct}%; background: var(--teal);"></div>
+          <div class="radar-stage">${buildRadar(radarTypes, h.LiveObservations || 0)}</div>
+          <div class="legend">${legendChips(radarTypes)}</div>
+        </section>
+
+        <section class="panel">
+          <div class="readout-block">
+            <div class="readout-cap"><span>RITMO · ÚLTIMOS ${state.window.toUpperCase()}</span><span>${barTypes.length} TIPOS</span></div>
+            <div class="readout-headline">${num(windowTotal)}<span class="readout-unit">/ ${state.window}</span></div>
+            <div class="readout-label">${num(windowTotal)} de ${num(h.LiveObservations || 0)} memorias se crearon en los ${windowLabel}</div>
+            ${typeBars(barTypes)}
           </div>
-        </div>
-      `;
-    });
 
-    // Top projects
-    let projRows = "";
-    projects.slice(0, 6).forEach((p) => {
-      projRows += `
-        <tr onclick="window.filterByProject('${escapeHtml(p.Name)}')">
-          <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(p.Name)}</td>
-          <td class="mono">${p.Observations}</td>
-          <td class="mono">${p.Sessions}</td>
-          <td class="mono">${p.Prompts}</td>
-        </tr>
-      `;
-    });
+          <div class="readout-block">
+            <div class="readout-cap">
+              <span>Daily activity · 30d</span>
+              <span>avg ${daily.avg_per_day.toFixed(1)} · peak ${num(peakCount)}${daily.peak_date ? " on " + esc(fmtDay(daily.peak_date)) : ""}</span>
+            </div>
+            <div class="strip">${strip}</div>
+            <div class="strip-axis"><span>${esc(fmtDay(daily.days[0]?.date || ""))}</span><span>${esc(fmtDay(daily.days[daily.days.length - 1]?.date || ""))}</span></div>
+          </div>
 
-    elMainContent.innerHTML = `
-      <div class="overview-stats" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
-        <div class="stat-card">
-          <span class="stat-label">Memorias Vivas</span>
-          <span class="stat-value" style="color: var(--teal);">${h.LiveObservations || 0}</span>
-          <span class="stat-sub">${h.TotalObservations || 0} total (${h.DeletedCount || 0} borradas)</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Actividad (24h)</span>
-          <span class="stat-value" style="color: var(--cyan);">${act.last_24h || 0}</span>
-          <span class="stat-sub">${act.last_7d || 0} en 7d · ${act.last_30d || 0} en 30d</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Vectores Semánticos</span>
-          <span class="stat-value" style="color: var(--emerald);">${emb.total_embedded || 0}</span>
-          <span class="stat-sub">${emb.available ? `${Math.round(emb.coverage_pct)}% cobertura · ${emb.dimensions}d` : "Inactivo"}</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Sesiones Totales</span>
-          <span class="stat-value" style="color: var(--magenta);">${h.TotalSessions || 0}</span>
-          <span class="stat-sub">${h.ActiveSessions || 0} activas ahora mismo</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Relaciones</span>
-          <span class="stat-value" style="color: var(--purple);">${rel.total || 0}</span>
-          <span class="stat-sub">${rel.conflicts || 0} conflictos · ${rel.pending || 0} pendientes</span>
-        </div>
-      </div>
-
-      <div class="overview-sections">
-        <div class="section-panel">
-          <div class="panel-header">
-            <div class="panel-title">
-              <svg style="width:16px;height:16px;color:var(--teal);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
-              <span>Distribución por Tipo</span>
+          <div class="readout-block">
+            <div class="readout-cap">
+              <span>Vector store coverage</span>
+              <span>${emb.available ? `${num(emb.total_embedded)} / ${num(emb.live_count)} · ${emb.dimensions}d` : "not installed"}</span>
+            </div>
+            <div class="meter"><div class="meter-fill" data-warn="${emb.pending_count > 0}" style="width:${Math.min(100, vectorPct)}%"></div></div>
+            <div class="strip-axis" style="margin-top:6px">
+              <span>${emb.available ? esc(emb.model.split("/").pop()) : "run engram-embed to create the index"}</span>
+              <span>${emb.pending_count > 0 ? `${num(emb.pending_count)} pending` : "all covered"}</span>
             </div>
           </div>
-          <div class="dist-list">
-            ${typesHtml || '<span class="text-muted">Sin datos de tipos</span>'}
-          </div>
-        </div>
-
-        <div class="section-panel">
-          <div class="panel-header">
-            <div class="panel-title">
-              <svg style="width:16px;height:16px;color:var(--cyan);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-              <span>Top Proyectos</span>
-            </div>
-          </div>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Proyecto</th>
-                <th>Obs</th>
-                <th>Sesiones</th>
-                <th>Prompts</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${projRows || '<tr><td colspan="4" class="text-muted">Sin proyectos</td></tr>'}
-            </tbody>
-          </table>
-        </div>
+        </section>
       </div>
-    `;
+
+      <div class="rail">
+        <div class="metric">
+          <div class="metric-value">${num(h.LiveObservations)}</div>
+          <div class="metric-label">Memories live</div>
+          <div class="metric-note">${num(h.DeletedCount)} soft-deleted kept</div>
+          <div class="metric-spark">${last14}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value">${num(h.TotalSessions)}</div>
+          <div class="metric-label">Sessions</div>
+          <div class="metric-note">${num(h.ActiveSessions)} still active</div>
+          <div class="metric-spark">${shareBars(projects.slice(0, 6).map((p) => ({ label: p.Name, n: p.Sessions })), "var(--t-manual)")}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value">${num(h.Projects)}</div>
+          <div class="metric-label">Projects</div>
+          <div class="metric-note">${num(h.ProjectsWithoutSession)} unowned names</div>
+          <div class="metric-spark">${shareBars(topProjects, "var(--t-config)")}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value">${num(act.last_24h)}</div>
+          <div class="metric-label">Last 24 hours</div>
+          <div class="metric-note">${act.last_24h > daily.avg_per_day ? "above" : "below"} the ${daily.avg_per_day.toFixed(0)}/day average</div>
+          <div class="metric-spark">${last14}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value">${num(act.last_7d)}</div>
+          <div class="metric-label">Last 7 days</div>
+          <div class="metric-note">${num(act.last_30d)} in 30 days</div>
+          <div class="metric-spark">${last14}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value">${num(rel.total)}</div>
+          <div class="metric-label">Relations</div>
+          <div class="metric-note">${num(rel.conflicts)} conflicting · ${num(rel.pending)} unjudged</div>
+          <div class="metric-spark">${shareBars(Object.entries(rel.by_kind || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([label, n]) => ({ label, n })), "var(--t-decision)")}</div>
+        </div>
+      </div>`;
+
+    wireCrossHighlight();
   }
 
-  // View: Memories
-  async function loadMemories() {
-    elMainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando lista de memorias...</span></div>`;
-    const f = state.memoriesFilter;
-    const params = new URLSearchParams();
-    if (f.q) params.set("q", f.q);
-    if (f.project) params.set("project", f.project);
-    if (f.type) params.set("type", f.type);
-    if (f.scope) params.set("scope", f.scope);
-    if (f.pinned) params.set("pinned", "true");
-    if (f.deleted) params.set("deleted", "true");
-    params.set("limit", f.limit);
-    params.set("offset", f.offset);
+  // ---------------------------------------------------------------- memories
 
+  async function loadMemories() {
+    loading("Loading memories…");
+    const f = state.filter;
+    const q = new URLSearchParams();
+    if (f.q) q.set("q", f.q);
+    if (f.project) q.set("project", f.project);
+    if (f.type) q.set("type", f.type);
+    if (f.pinned) q.set("pinned", "1");
+    if (f.deleted) q.set("deleted", "1");
+    q.set("limit", f.limit);
+    q.set("offset", f.offset);
     try {
-      const data = await api(`/api/observations?${params.toString()}`);
+      const data = await api(`/api/observations?${q}`);
       state.memories = data.observations || [];
       renderMemories();
     } catch (err) {
-      elMainContent.innerHTML = `<div class="empty-state">Error cargando memorias: ${escapeHtml(err.message)}</div>`;
+      failed(err, loadMemories);
     }
   }
 
   function renderMemories() {
-    const f = state.memoriesFilter;
-    const rows = state.memories.map((o) => {
-      const pinIcon = o.Pinned ? `<span class="pinned-icon" title="Fijada">★</span>` : "";
-      return `
-        <tr onclick="window.openMemory(${o.ID})">
-          <td class="mono" style="color: var(--text-muted); font-size: 11px;">#${o.ID}</td>
-          <td><span class="badge badge-${escapeHtml(o.Type)}">${escapeHtml(o.Type)}</span></td>
-          <td style="font-weight: 500; color: var(--text-primary); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-            ${pinIcon}${escapeHtml(o.Title)}
-          </td>
-          <td class="mono" style="font-size: 12px;">${escapeHtml(o.Project || "—")}</td>
-          <td style="font-size: 12px; color: var(--text-muted);">${formatDate(o.UpdatedAt || o.CreatedAt)}</td>
-        </tr>
-      `;
-    }).join("");
+    const f = state.filter;
+    const rows = state.memories.map((o) => `
+      <tr data-clickable="true" data-open="${o.ID}">
+        <td class="mono" style="color:var(--fg-mute)">${o.ID}</td>
+        <td><span class="chip" style="--chip:${hueOf(o.Type)}">${esc(o.Type)}</span></td>
+        <td class="strong truncate">${o.Pinned ? `<span style="color:var(--pending)">★</span> ` : ""}${esc(o.Title)}</td>
+        <td class="truncate" style="font-family:var(--font-mono);font-size:11.5px">${esc(o.Project || "—")}</td>
+        <td class="mono" style="font-size:11.5px;white-space:nowrap">${esc(fmtDate(o.UpdatedAt || o.CreatedAt))}</td>
+        <td>${o.HasVector ? `<span style="color:var(--healthy)" title="${esc(o.VectorDims)}d vector">●</span>` : `<span style="color:var(--fg-mute)" title="no vector">○</span>`}</td>
+      </tr>`).join("");
 
-    elMainContent.innerHTML = `
-      <div class="data-table-wrapper">
-        <div class="table-toolbar">
-          <div class="toolbar-filters">
-            <select class="filter-select" id="filter-type" onchange="window.onFilterChange('type', this.value)">
-              <option value="">Todos los tipos</option>
-              <option value="decision" ${f.type === "decision" ? "selected" : ""}>decision</option>
-              <option value="bugfix" ${f.type === "bugfix" ? "selected" : ""}>bugfix</option>
-              <option value="architecture" ${f.type === "architecture" ? "selected" : ""}>architecture</option>
-              <option value="discovery" ${f.type === "discovery" ? "selected" : ""}>discovery</option>
-              <option value="config" ${f.type === "config" ? "selected" : ""}>config</option>
-              <option value="learning" ${f.type === "learning" ? "selected" : ""}>learning</option>
-              <option value="pattern" ${f.type === "pattern" ? "selected" : ""}>pattern</option>
-              <option value="session_summary" ${f.type === "session_summary" ? "selected" : ""}>session_summary</option>
+    content.innerHTML = `
+      <div class="sheet">
+        <div class="sheet-head">
+          <div class="sheet-filters">
+            <input class="filter" type="text" placeholder="Filter by project…" value="${esc(f.project)}"
+                   data-filter="project" style="width:180px">
+            <select class="filter" data-filter="type">
+              <option value="">All types</option>
+              ${[...new Set((state.overview?.types_all || []).map((t) => t.type))]
+                .map((t) => `<option value="${esc(t)}" ${f.type === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
             </select>
-            <input type="text" class="filter-select" placeholder="Filtrar por proyecto..." value="${escapeHtml(f.project)}" onchange="window.onFilterChange('project', this.value)" style="width: 160px;" />
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
-              <input type="checkbox" ${f.pinned ? "checked" : ""} onchange="window.onFilterChange('pinned', this.checked)" /> Fijadas
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
-              <input type="checkbox" ${f.deleted ? "checked" : ""} onchange="window.onFilterChange('deleted', this.checked)" /> Ver borradas
-            </label>
+            <label class="check"><input type="checkbox" data-filter="pinned" ${f.pinned ? "checked" : ""}> Pinned</label>
+            <label class="check"><input type="checkbox" data-filter="deleted" ${f.deleted ? "checked" : ""}> Show deleted</label>
           </div>
-          <div style="font-size: 12px; color: var(--text-muted);">
-            Mostrando ${state.memories.length} resultados
-          </div>
+          <span class="sheet-note">${num(state.memories.length)} shown${f.q ? ` for “${esc(f.q)}”` : ""}</span>
         </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th style="width: 60px;">ID</th>
-              <th style="width: 130px;">Tipo</th>
-              <th>Título</th>
-              <th style="width: 150px;">Proyecto</th>
-              <th style="width: 140px;">Actualizado</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="5" class="empty-state">No se encontraron observaciones</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    `;
+        ${state.memories.length ? `<table class="table">
+          <thead><tr>
+            <th style="width:52px">ID</th><th style="width:132px">Type</th><th>Title</th>
+            <th style="width:150px">Project</th><th style="width:132px">Updated</th>
+            <th style="width:44px" title="Has semantic vector">Vec</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>` : `<div class="state">
+          <h3>Nothing matches</h3>
+          <p>No memory matches these filters. Loosen them, or press <code>/</code> to search the full text index.</p>
+        </div>`}
+      </div>`;
+
+    $$("[data-open]", content).forEach((tr) =>
+      tr.addEventListener("click", () => openMemory(tr.dataset.open)));
+
+    $$("[data-filter]", content).forEach((el) => {
+      const apply = () => {
+        const key = el.dataset.filter;
+        state.filter[key] = el.type === "checkbox" ? el.checked : el.value.trim();
+        state.filter.offset = 0;
+        loadMemories();
+      };
+      el.addEventListener("change", apply);
+      if (el.type === "text") el.addEventListener("change", apply);
+    });
   }
 
-  // View: Relations
+  // ---------------------------------------------------------------- relations
+
   async function loadRelations() {
-    elMainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando grafo de relaciones...</span></div>`;
+    loading("Loading the relation graph…");
     try {
-      const data = await api("/api/relations?limit=150");
+      const data = await api("/api/relations?limit=200");
       state.relations = data.relations || [];
       state.relationsSummary = data.summary || {};
       renderRelations();
     } catch (err) {
-      elMainContent.innerHTML = `<div class="empty-state">Error cargando relaciones: ${escapeHtml(err.message)}</div>`;
+      failed(err, loadRelations);
     }
   }
 
   function renderRelations() {
     const sum = state.relationsSummary || {};
-    const rows = state.relations.map((r) => {
-      const isConflict = r.relation === "conflicts_with";
-      const srcId = r.source_obs_id || r.source_id;
-      const tgtId = r.target_obs_id || r.target_id;
-      return `
-        <tr>
-          <td class="mono" style="font-size: 11px;">#${r.id}</td>
-          <td>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span class="badge ${isConflict ? "badge-conflict" : "badge-default"}">${escapeHtml(r.relation)}</span>
-              <span class="badge badge-${escapeHtml(r.judgment_status)}">${escapeHtml(r.judgment_status)}</span>
-            </div>
-          </td>
-          <td>
-            <div style="display:flex;flex-direction:column;gap:2px;">
-              <a href="javascript:void(0)" onclick="window.openMemory('${srcId}')" style="color:var(--cyan);text-decoration:none;font-weight:500;">
-                #${srcId}: ${escapeHtml(r.source_title || "Memoria origen")}
-              </a>
-              <span style="font-size:11px;color:var(--text-muted);">↳ Hacia: <a href="javascript:void(0)" onclick="window.openMemory('${tgtId}')" style="color:var(--teal);text-decoration:none;">#${tgtId}: ${escapeHtml(r.target_title || "Memoria destino")}</a></span>
-            </div>
-          </td>
-          <td style="font-size:12px;color:var(--text-secondary);max-width:260px;">
-            ${escapeHtml(r.reason || "—")}
-          </td>
-          <td class="mono" style="font-size:11.5px;">${r.confidence ? r.confidence.toFixed(2) : "—"}</td>
-        </tr>
-      `;
-    }).join("");
+    const kinds = Object.entries(sum.by_kind || {}).sort((a, b) => b[1] - a[1]);
+    const maxKind = Math.max(1, ...kinds.map(([, n]) => n));
 
-    elMainContent.innerHTML = `
-      <div class="overview-stats" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 20px;">
-        <div class="stat-card">
-          <span class="stat-label">Total Relaciones</span>
-          <span class="stat-value" style="color:var(--purple);">${sum.total || 0}</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Conflictos</span>
-          <span class="stat-value" style="color:var(--rose);">${sum.conflicts || 0}</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Pendientes de Juicio</span>
-          <span class="stat-value" style="color:var(--amber);">${sum.pending || 0}</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Compatibles / Conexas</span>
-          <span class="stat-value" style="color:var(--teal);">${(sum.by_kind?.compatible || 0) + (sum.by_kind?.related || 0)}</span>
-        </div>
+    const rows = state.relations.map((r) => `
+      <tr>
+        <td><span class="tag ${r.relation === "conflicts_with" ? "tag-conflict" : "tag-judged"}">${esc(r.relation)}</span></td>
+        <td><span class="tag tag-${esc(r.judgment_status)}">${esc(r.judgment_status)}</span></td>
+        <td class="truncate"><button class="link" data-open="${esc(r.source_obs_id || r.source_id)}">${esc(r.source_title || r.source_id)}</button></td>
+        <td class="truncate"><button class="link" data-open="${esc(r.target_obs_id || r.target_id)}">${esc(r.target_title || r.target_id)}</button></td>
+        <td class="truncate">${esc(r.reason || "—")}</td>
+        <td class="mono" style="text-align:right">${r.confidence ? r.confidence.toFixed(2) : "—"}</td>
+      </tr>`).join("");
+
+    content.innerHTML = `
+      <div class="instrument">
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Relation kinds</h2>
+            <span class="panel-note">${num(sum.total)} judged · ${num(sum.pending)} pending</span>
+          </div>
+          <div class="typebars">
+            ${kinds.map(([kind, n]) => `
+              <div class="typebar" aria-disabled="true">
+                <span class="typebar-label"><i class="legend-swatch" style="background:${kind === "conflicts_with" ? "var(--conflict)" : kind === "supersedes" ? "var(--accent)" : "var(--t-decision)"}"></i><b>${esc(kind)}</b></span>
+                <span class="typebar-track"><span class="typebar-fill" style="width:${(n / maxKind) * 100}%;background:${kind === "conflicts_with" ? "var(--conflict)" : kind === "supersedes" ? "var(--accent)" : "var(--t-decision)"}"></span></span>
+                <span class="typebar-num">${num(n)}</span>
+              </div>`).join("") || `<p class="sheet-note">No relations recorded.</p>`}
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Judgement queue</h2>
+            <span class="panel-note">memory_relations.judgment_status</span>
+          </div>
+          <div class="typebars">
+            ${Object.entries(sum.by_status || {}).map(([st, n]) => `
+              <div class="typebar" aria-disabled="true">
+                <span class="typebar-label"><b>${esc(st)}</b></span>
+                <span class="typebar-track"><span class="typebar-fill" style="width:${(n / Math.max(1, sum.total)) * 100}%;background:${st === "pending" ? "var(--pending)" : "var(--healthy)"}"></span></span>
+                <span class="typebar-num">${num(n)}</span>
+              </div>`).join("") || `<p class="sheet-note">Nothing to judge.</p>`}
+          </div>
+        </section>
       </div>
 
-      <div class="data-table-wrapper">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th style="width:60px;">ID</th>
-              <th style="width:200px;">Relación & Estado</th>
-              <th>Enlace (Origen → Destino)</th>
-              <th>Razón / Evidencia</th>
-              <th style="width:90px;">Confianza</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="5" class="empty-state">No hay relaciones registradas</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    `;
+      <div class="sheet">
+        <div class="sheet-head">
+          <span class="sheet-title">Most recent relations</span>
+          <span class="sheet-note">${num(state.relations.length)} of ${num(sum.total)} shown</span>
+        </div>
+        ${rows ? `<table class="table">
+          <thead><tr>
+            <th style="width:130px">Relation</th><th style="width:96px">Status</th>
+            <th>Source</th><th>Target</th><th style="width:240px">Reason</th>
+            <th style="width:70px;text-align:right">Conf.</th>
+          </tr></thead><tbody>${rows}</tbody>
+        </table>` : `<div class="state"><h3>No relations yet</h3><p>Engram records relations as memories are judged. Nothing has been judged in this store.</p></div>`}
+      </div>`;
+
+    $$("[data-open]", content).forEach((b) =>
+      b.addEventListener("click", () => openMemory(b.dataset.open)));
   }
 
-  // View: Sessions & Timeline
+  // ---------------------------------------------------------------- sessions
+
   async function loadSessions() {
-    elMainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando sesiones...</span></div>`;
+    loading("Loading sessions…");
     try {
-      const data = await api("/api/sessions?limit=100");
+      const data = await api("/api/sessions?limit=120");
       state.sessions = data.sessions || [];
       renderSessions();
     } catch (err) {
-      elMainContent.innerHTML = `<div class="empty-state">Error cargando sesiones: ${escapeHtml(err.message)}</div>`;
+      failed(err, loadSessions);
     }
   }
 
   function renderSessions() {
-    const rows = state.sessions.map((s) => {
-      const isActive = !s.EndedAt;
-      return `
-        <tr onclick="window.openSessionTimeline('${escapeHtml(s.ID)}')">
-          <td class="mono" style="color: var(--teal); font-weight: 600;">${escapeHtml(s.ID)}</td>
-          <td style="font-weight: 500;">${escapeHtml(s.Project || "—")}</td>
-          <td class="mono" style="font-size: 11.5px; max-width: 260px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(s.Directory || "—")}</td>
-          <td class="mono">${s.ObservationCount}</td>
-          <td>
-            <span class="badge ${isActive ? "badge-discovery" : "badge-default"}">${isActive ? "ACTIVA" : "CERRADA"}</span>
-          </td>
-          <td style="font-size: 12px; color: var(--text-muted);">${formatDate(s.StartedAt)}</td>
-        </tr>
-      `;
-    }).join("");
+    const rows = state.sessions.map((s) => `
+      <tr data-clickable="true" data-timeline="${esc(s.ID)}">
+        <td class="mono strong">${esc(s.ID)}</td>
+        <td class="truncate">${esc(s.Project || "—")}</td>
+        <td class="truncate" style="font-family:var(--font-mono);font-size:11.5px">${esc(s.Directory || "—")}</td>
+        <td class="mono" style="text-align:right">${s.ObservationCount}</td>
+        <td><span class="tag ${s.EndedAt ? "tag-closed" : "tag-live"}">${s.EndedAt ? "closed" : "active"}</span></td>
+        <td class="mono" style="font-size:11.5px;white-space:nowrap">${esc(fmtDate(s.StartedAt))}</td>
+      </tr>`).join("");
 
-    elMainContent.innerHTML = `
-      <div class="data-table-wrapper">
-        <div class="table-toolbar">
-          <div style="font-size: 13px; font-weight: 600;">Sesiones Registradas (${state.sessions.length})</div>
-          <div style="font-size: 12px; color: var(--text-muted);">Haz clic en una sesión para ver su línea de tiempo cronológica</div>
+    content.innerHTML = `
+      <div class="sheet">
+        <div class="sheet-head">
+          <span class="sheet-title">Sessions</span>
+          <span class="sheet-note">Select one to read its timeline</span>
         </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th style="width: 140px;">ID Sesión</th>
-              <th style="width: 140px;">Proyecto</th>
-              <th>Directorio de Trabajo</th>
-              <th style="width: 90px;">Obs</th>
-              <th style="width: 100px;">Estado</th>
-              <th style="width: 140px;">Iniciada</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="6" class="empty-state">No hay sesiones registradas</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    `;
+        ${rows ? `<table class="table">
+          <thead><tr>
+            <th style="width:190px">ID</th><th style="width:140px">Project</th><th>Directory</th>
+            <th style="width:56px;text-align:right">Obs</th><th style="width:80px">State</th>
+            <th style="width:132px">Started</th>
+          </tr></thead><tbody>${rows}</tbody>
+        </table>` : `<div class="state"><h3>No sessions</h3><p>This store has no recorded sessions yet.</p></div>`}
+      </div>`;
+
+    $$("[data-timeline]", content).forEach((tr) =>
+      tr.addEventListener("click", () => openTimeline(tr.dataset.timeline)));
   }
 
-  // Session Timeline View
-  async function openSessionTimeline(sessionId) {
-    elMainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando línea de tiempo de la sesión...</span></div>`;
+  async function openTimeline(id) {
+    loading("Reading the session timeline…");
     try {
-      const data = await api(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`);
-      state.sessionTimeline = data;
-      renderSessionTimeline(data);
+      state.timeline = await api(`/api/sessions/${encodeURIComponent(id)}/timeline`);
+      renderTimeline();
     } catch (err) {
-      elMainContent.innerHTML = `<div class="empty-state">Error cargando timeline: ${escapeHtml(err.message)}</div>`;
+      failed(err, () => loadSessions());
     }
   }
 
-  function renderSessionTimeline(data) {
-    const obs = data.observations || [];
-    const prompts = data.prompts || [];
+  function renderTimeline() {
+    const t = state.timeline;
+    const obs = t.observations || [];
+    const prompts = t.prompts || [];
 
-    const obsEntries = obs.map((o) => `
-      <div class="timeline-entry">
-        <div class="timeline-dot"></div>
-        <div class="timeline-card" onclick="window.openMemory(${o.ID})" style="cursor: pointer;">
-          <div class="timeline-meta">
-            <span class="badge badge-${escapeHtml(o.Type)}">${escapeHtml(o.Type)}</span>
-            <span class="mono">#${o.ID}</span>
-            <span>·</span>
-            <span>${formatDate(o.CreatedAt)}</span>
-          </div>
-          <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">${escapeHtml(o.Title)}</div>
-          <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.4;">${escapeHtml(o.Content.slice(0, 180))}${o.Content.length > 180 ? "…" : ""}</div>
-        </div>
-      </div>
-    `).join("");
-
-    elMainContent.innerHTML = `
-      <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
+    const entries = obs.map((o) => `
+      <div style="display:grid;grid-template-columns:118px 1fr;gap:var(--s4);padding-bottom:var(--s4)">
         <div>
-          <button class="btn btn-secondary" onclick="window.setView('sessions')" style="margin-bottom: 8px;">
-            ← Volver a Sesiones
-          </button>
-          <h2 style="font-size: 18px; font-weight: 700;">Línea de Tiempo: <span class="mono" style="color:var(--teal);">${escapeHtml(data.session_id)}</span></h2>
-          <span style="font-size: 12px; color: var(--text-muted);">${obs.length} observaciones generadas</span>
-        </div>
-      </div>
-
-      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px;">
-        <div class="timeline-flow">
-          ${obsEntries || '<div class="empty-state">Esta sesión no produjo observaciones</div>'}
+          <div class="mono" style="font-size:11.5px;color:var(--fg-mute)">${esc(fmtDate(o.CreatedAt))}</div>
+          <div class="mono" style="font-size:11px;color:var(--fg-mute)">#${o.ID}</div>
         </div>
         <div>
-          <div class="section-panel">
-            <div class="panel-header">
-              <span class="panel-title">Prompts de la Sesión (${prompts.length})</span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 10px; max-height: 500px; overflow-y: auto;">
-              ${prompts.map(p => `
-                <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 12px;">
-                  <div style="color: var(--text-muted); font-size: 11px; margin-bottom: 4px;">${formatDate(p.CreatedAt)}</div>
-                  <div style="color: var(--text-primary);">${escapeHtml(p.Content)}</div>
-                </div>
-              `).join("") || '<span class="text-muted" style="font-size: 12px;">Sin prompts registrados</span>'}
-            </div>
+          <div style="display:flex;align-items:center;gap:var(--s2);margin-bottom:3px">
+            <span class="chip" style="--chip:${hueOf(o.Type)}">${esc(o.Type)}</span>
+            <strong style="font-size:13px;font-weight:600">${esc(o.Title)}</strong>
           </div>
+          <p style="font-size:12.5px;color:var(--fg-dim);line-height:1.5">${esc(o.Content.slice(0, 260))}${o.Content.length > 260 ? "…" : ""}</p>
         </div>
-      </div>
-    `;
+      </div>`).join("");
+
+    content.innerHTML = `
+      <div class="instrument" style="grid-template-columns:minmax(0,7fr) minmax(0,3fr)">
+        <section class="panel">
+          <div class="panel-head">
+            <button class="btn" data-back>← Sessions</button>
+            <span class="panel-note">${obs.length} observations · ${prompts.length} prompts</span>
+          </div>
+          <div class="mono" style="font-size:13px;color:var(--fg);margin-bottom:var(--s4)">${esc(t.session_id)}</div>
+          ${entries || `<div class="state"><h3>Empty session</h3><p>This session recorded no observations.</p></div>`}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2 class="panel-title">Prompts</h2></div>
+          ${prompts.map((p) => `
+            <div style="padding:var(--s3) 0;border-bottom:1px solid var(--line-soft)">
+              <div class="mono" style="font-size:10.5px;color:var(--fg-mute);margin-bottom:3px">${esc(fmtDate(p.CreatedAt))}</div>
+              <p style="font-size:12.5px;color:var(--fg-dim)">${esc(p.Content)}</p>
+            </div>`).join("") || `<p class="sheet-note">No prompts recorded for this session.</p>`}
+        </section>
+      </div>`;
+
+    $("[data-back]", content).addEventListener("click", loadSessions);
   }
 
-  // View: Review Queue
-  async function loadReviewQueue() {
-    elMainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Cargando cola de revisión...</span></div>`;
+  // ---------------------------------------------------------------- review
+
+  async function loadReview() {
+    loading("Loading the review queue…");
     try {
       const data = await api("/api/review-queue");
-      renderReviewQueue(data.queue || []);
+      state.review = data.queue || [];
+      renderReview();
     } catch (err) {
-      elMainContent.innerHTML = `<div class="empty-state">Error cargando revisión: ${escapeHtml(err.message)}</div>`;
+      failed(err, loadReview);
     }
   }
 
-  function renderReviewQueue(queue) {
-    const rows = queue.map((o) => `
+  function renderReview() {
+    const rows = state.review.map((o) => `
       <tr>
-        <td class="mono" style="font-size: 11px;">#${o.ID}</td>
-        <td><span class="badge badge-${escapeHtml(o.Type)}">${escapeHtml(o.Type)}</span></td>
-        <td style="font-weight: 500; color: var(--text-primary);" onclick="window.openMemory(${o.ID})">${escapeHtml(o.Title)}</td>
-        <td class="mono" style="color: var(--amber); font-size: 12px;">${formatDate(o.ReviewAfter)}</td>
-        <td>
-          <button class="btn btn-secondary" onclick="window.markReviewed(${o.ID})" style="padding: 4px 10px; font-size: 12px;">
-            ✓ Revisada
-          </button>
-        </td>
-      </tr>
-    `).join("");
+        <td class="mono" style="color:var(--fg-mute)">${o.ID}</td>
+        <td><span class="chip" style="--chip:${hueOf(o.Type)}">${esc(o.Type)}</span></td>
+        <td class="strong truncate"><button class="link" data-open="${o.ID}">${esc(o.Title)}</button></td>
+        <td class="mono" style="font-size:11.5px;white-space:nowrap">${esc(fmtDate(o.ReviewAfter))}</td>
+        <td style="text-align:right"><button class="btn" data-review="${o.ID}">Mark reviewed</button></td>
+      </tr>`).join("");
 
-    elMainContent.innerHTML = `
-      <div class="data-table-wrapper">
-        <div class="table-toolbar">
-          <div style="font-size: 13px; font-weight: 600;">Memorias con Revisión Programada (${queue.length})</div>
-          <div style="font-size: 12px; color: var(--text-muted);">Verifica la vigencia de memorias y actualiza su estado</div>
+    content.innerHTML = `
+      <div class="sheet">
+        <div class="sheet-head">
+          <span class="sheet-title">Scheduled for review</span>
+          <span class="sheet-note">${num(state.review.length)} memories carry a review_after date</span>
         </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th style="width: 60px;">ID</th>
-              <th style="width: 130px;">Tipo</th>
-              <th>Título</th>
-              <th style="width: 150px;">Revisar Después De</th>
-              <th style="width: 120px;">Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="5" class="empty-state">No hay memorias pendientes de revisión</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    `;
+        ${rows ? `<table class="table">
+          <thead><tr>
+            <th style="width:52px">ID</th><th style="width:132px">Type</th><th>Title</th>
+            <th style="width:150px">Review after</th><th style="width:150px;text-align:right">Action</th>
+          </tr></thead><tbody>${rows}</tbody>
+        </table>` : `<div class="state">
+          <h3>Nothing to review</h3>
+          <p>No memory in this store has a scheduled review date. Everything here is considered current.</p>
+        </div>`}
+      </div>`;
+
+    $$("[data-open]", content).forEach((b) => b.addEventListener("click", () => openMemory(b.dataset.open)));
+    $$("[data-review]", content).forEach((b) =>
+      b.addEventListener("click", () => markReviewed(b.dataset.review)));
   }
 
-  // View: System & Health
+  // ---------------------------------------------------------------- system
+
   async function loadSystem() {
-    elMainContent.innerHTML = `<div class="loading-state"><div class="spinner"></div><span>Inspeccionando invariantes del sistema...</span></div>`;
+    loading("Inspecting the store…");
     try {
       const data = await api("/api/health");
-      const h = data.health || {};
-      const emb = data.embeddings || {};
-
-      const shortModel = emb.model ? (emb.model.includes('/') ? emb.model.split('/').pop() : emb.model) : "—";
-
-      elMainContent.innerHTML = `
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
-          <div class="section-panel">
-            <div class="panel-header">
-              <span class="panel-title">Estado de Invariantes de Almacén</span>
-            </div>
-            <table class="data-table">
-              <tbody>
-                <tr><td>Total de Observaciones</td><td class="mono">${h.TotalObservations}</td></tr>
-                <tr><td>Observaciones Vivas</td><td class="mono" style="color:var(--teal);">${h.LiveObservations}</td></tr>
-                <tr><td>Observaciones Borradas (Soft)</td><td class="mono">${h.DeletedCount}</td></tr>
-                <tr><td>Sesiones Huérfanas</td><td class="mono ${h.OrphanSessions > 0 ? 'badge-conflict' : ''}">${h.OrphanSessions}</td></tr>
-                <tr><td>Sesiones Ambiguas</td><td class="mono ${h.AmbiguousSessions > 0 ? 'badge-conflict' : ''}">${h.AmbiguousSessions}</td></tr>
-                <tr><td>Proyectos sin Sesión</td><td class="mono ${h.ProjectsWithoutSession > 0 ? 'badge-conflict' : ''}">${h.ProjectsWithoutSession}</td></tr>
-                <tr><td>Duplicados Detectados</td><td class="mono">${h.DuplicateCount}</td></tr>
-                <tr><td>Memorias Fijadas</td><td class="mono" style="color:var(--amber);">${h.PinnedCount}</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="section-panel">
-            <div class="panel-header">
-              <span class="panel-title">Vector Store & Embeddings Semánticos</span>
-            </div>
-            <table class="data-table">
-              <tbody>
-                <tr><td>Estado del Índice</td><td class="mono" style="color:${emb.available ? 'var(--emerald)' : 'var(--rose)'};">${emb.available ? 'Activo (SQLite)' : 'Inactivo'}</td></tr>
-                <tr><td>Total Vectores</td><td class="mono">${emb.total_embedded || 0}</td></tr>
-                <tr><td>Cobertura Semántica</td><td class="mono" style="color:var(--emerald);">${emb.coverage_pct ? emb.coverage_pct.toFixed(1) : 0}%</td></tr>
-                <tr><td>Vectores Pendientes</td><td class="mono ${emb.pending_count > 0 ? 'badge-pending' : ''}">${emb.pending_count || 0}</td></tr>
-                <tr><td>Modelo de Embeddings</td><td class="mono" title="${escapeHtml(emb.model || '')}">${escapeHtml(shortModel)}</td></tr>
-                <tr><td>Dimensiones</td><td class="mono">${emb.dimensions ? emb.dimensions + 'd (float32)' : '—'}</td></tr>
-                <tr><td>Watcher Automático</td><td class="mono">engram-embed-watch (systemd)</td></tr>
-                <tr><td>Última Actualización</td><td class="mono" style="font-size:11px;">${formatDate(emb.latest_at)}</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="section-panel">
-            <div class="panel-header">
-              <span class="panel-title">Almacenamiento SQLite & WAL</span>
-            </div>
-            <table class="data-table">
-              <tbody>
-                <tr><td>Tamaño de Base de Datos</td><td class="mono">${formatBytes(data.db_size)}</td></tr>
-                <tr><td>Tamaño de WAL (Write-Ahead Log)</td><td class="mono">${formatBytes(data.wal_size)}</td></tr>
-                <tr><td>Modo de Conexión Go</td><td class="mono">mode=ro (Direct SQLite)</td></tr>
-                <tr><td>API de Mutación Engram</td><td class="mono">${data.api_status}</td></tr>
-              </tbody>
-            </table>
-            <div style="margin-top: 14px; padding: 10px; background: var(--bg-surface); border-radius: var(--radius-sm); font-size: 11.5px; color: var(--text-secondary);">
-              <strong>Arquitectura Híbrida:</strong> Todas las consultas analíticas, métricas y búsquedas por trigrama leen directamente del SQLite en modo de solo lectura (sin contención de bloqueo). Todas las modificaciones pasan por el servidor HTTP de Engram para preservar el control de concurrencia y relaciones.
-            </div>
-          </div>
-        </div>
-      `;
+      state.health = data;
+      renderSystem();
     } catch (err) {
-      elMainContent.innerHTML = `<div class="empty-state">Error cargando salud: ${escapeHtml(err.message)}</div>`;
+      failed(err, loadSystem);
     }
   }
 
-  // Drawer & Memory Actions
-  async function openMemory(id) {
+  function renderSystem() {
+    const data = state.health;
+    const h = data.health || {};
+    const emb = data.embeddings || {};
+
+    const invariants = [
+      ["Live memories", num(h.LiveObservations), null],
+      ["Soft-deleted kept", num(h.DeletedCount), null],
+      ["Sessions sharing a project", num(h.AmbiguousSessions), h.AmbiguousSessions > 0],
+      ["Projects with no session", num(h.ProjectsWithoutSession), h.ProjectsWithoutSession > 0],
+      ["Memories on a missing session", num(h.OrphanSessions), h.OrphanSessions > 0],
+      ["Duplicate rows collapsed", num(h.DuplicateCount), null],
+      ["Pinned", num(h.PinnedCount), null],
+      ["Expiring within 30d", num(h.ExpiringSoon), h.ExpiringSoon > 0],
+    ];
+
+    content.innerHTML = `
+      <div class="instrument" style="grid-template-columns:repeat(auto-fit,minmax(360px,1fr))">
+        <section class="panel">
+          <div class="panel-head"><h2 class="panel-title">Store invariants</h2></div>
+          <div class="typebars">
+            ${invariants.map(([label, value, bad]) => `
+              <div class="typebar typebar-kv" aria-disabled="true">
+                <span class="typebar-label"><b>${esc(label)}</b></span>
+                <span class="typebar-num" style="color:${bad ? "var(--conflict)" : "var(--fg)"}">${value}</span>
+              </div>`).join("")}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2 class="panel-title">Vector store</h2><span class="panel-note">observation_embeddings</span></div>
+          <div class="typebars">
+            ${[
+              ["Index state", emb.available ? "active" : "absent", null],
+              ["Vectors", num(emb.total_embedded), null],
+              ["Pending", num(emb.pending_count), emb.pending_count > 0],
+              ["Dimensions", emb.dimensions ? `${emb.dimensions} · float32` : "—", null],
+              ["Model", emb.model ? emb.model.split("/").pop() : "—", null],
+              ["Last vector", fmtDate(emb.latest_at), null],
+            ].map(([label, value, bad]) => `
+              <div class="typebar typebar-kv" aria-disabled="true">
+                <span class="typebar-label"><b>${esc(label)}</b></span>
+                <span class="typebar-num" style="color:${bad ? "var(--pending)" : "var(--fg)"}">${esc(value)}</span>
+              </div>`).join("")}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2 class="panel-title">Storage & wiring</h2></div>
+          <div class="typebars">
+            ${[
+              ["Database", bytes(data.db_size), null],
+              ["WAL", bytes(data.wal_size), null],
+              ["Read path", "sqlite mode=ro", null],
+              ["Write path", data.api_status === "connected" ? "engram serve" : `engram serve (${data.api_status})`, data.api_status !== "connected"],
+              ["Auto-embedder", "engram-embed-watch", null],
+            ].map(([label, value, bad]) => `
+              <div class="typebar typebar-kv" aria-disabled="true">
+                <span class="typebar-label"><b>${esc(label)}</b></span>
+                <span class="typebar-num" style="color:${bad ? "var(--pending)" : "var(--fg)"}">${esc(value)}</span>
+              </div>`).join("")}
+          </div>
+        </section>
+      </div>
+
+      <div class="rail" style="margin-top:var(--s4)">
+        <div class="metric"><div class="metric-value">${num(h.TotalObservations)}</div><div class="metric-label">Observations total</div></div>
+        <div class="metric"><div class="metric-value">${num(h.TotalSessions)}</div><div class="metric-label">Sessions total</div></div>
+        <div class="metric"><div class="metric-value">${num(h.TotalPrompts)}</div><div class="metric-label">Prompts recorded</div></div>
+        <div class="metric"><div class="metric-value">${num(h.Projects)}</div><div class="metric-label">Projects</div></div>
+        <div class="metric"><div class="metric-value">${emb.available ? pct(emb.coverage_pct) : "—"}</div><div class="metric-label">Vector coverage</div></div>
+        <div class="metric"><div class="metric-value">${num(data.relations)}</div><div class="metric-label">Relations</div></div>
+      </div>`;
+  }
+
+  // ---------------------------------------------------------------- drawer
+
+  async function openMemory(ref) {
     try {
-      const data = await api(`/api/observations/${id}`);
-      state.selectedMemory = data.observation;
-      state.editingMemory = false;
-      renderDrawer(data.observation, data.relations || []);
-      elDrawer.classList.remove("hidden");
-      elDrawerBackdrop.classList.remove("hidden");
+      const data = await api(`/api/observations/${encodeURIComponent(ref)}`);
+      state.memory = data.observation;
+      state.memoryRelations = data.relations || [];
+      state.editing = false;
+      renderDrawer();
+      drawer.hidden = false;
+      backdrop.hidden = false;
+      $("[data-drawer-close]").focus();
     } catch (err) {
-      showToast(`Error abriendo memoria: ${err.message}`, true);
+      toast(`Could not open memory #${ref}: ${err.message}`, "error");
     }
   }
 
   function closeDrawer() {
-    elDrawer.classList.add("hidden");
-    elDrawerBackdrop.classList.add("hidden");
-    state.selectedMemory = null;
-    state.editingMemory = false;
+    drawer.hidden = true;
+    backdrop.hidden = true;
+    state.memory = null;
   }
 
-  function renderDrawer(o, rels) {
-    elDrawerEyebrow.textContent = `MEMORIA #${o.ID} · ${o.Scope.toUpperCase()}`;
-    elDrawerTitle.textContent = o.Title;
+  function renderDrawer() {
+    const o = state.memory;
+    $("[data-drawer-ref]").textContent = `#${o.ID} · ${o.Project || "unassigned"} · ${o.Scope}`;
+    $("[data-drawer-title]").textContent = o.Title;
 
-    let relsHtml = "";
-    if (rels && rels.length > 0) {
-      relsHtml = `
-        <div style="margin-top: 14px;">
-          <span style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Relaciones Vinculadas (${rels.length})</span>
-          <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">
-            ${rels.map(r => `
-              <div style="padding:6px 10px;background:var(--bg-base);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;display:flex;align-items:center;justify-content:space-between;">
-                <div style="display:flex;align-items:center;gap:6px;">
-                  <span class="badge ${r.relation === 'conflicts_with' ? 'badge-conflict' : 'badge-default'}">${escapeHtml(r.relation)}</span>
-                  <span>#${r.target_id === String(o.ID) ? r.source_id : r.target_id}</span>
-                </div>
-                <span class="mono" style="font-size:11px;color:var(--text-muted);">${escapeHtml(r.judgment_status)}</span>
-              </div>
-            `).join("")}
-          </div>
+    const rels = state.memoryRelations.length ? `
+      <div>
+        <h3 class="panel-title" style="margin-bottom:var(--s3)">Relations (${state.memoryRelations.length})</h3>
+        <div class="rels">
+          ${state.memoryRelations.map((r) => {
+            const other = String(r.source_obs_id || r.source_id) === String(o.ID) ? r.target_obs_id || r.target_id : r.source_obs_id || r.source_id;
+            const otherTitle = String(r.source_obs_id || r.source_id) === String(o.ID) ? r.target_title : r.source_title;
+            return `<div class="rel">
+              <button class="link" data-open="${esc(other)}">${esc(otherTitle || other)}</button>
+              <span class="tag ${r.relation === "conflicts_with" ? "tag-conflict" : "tag-judged"}">${esc(r.relation)}</span>
+            </div>`;
+          }).join("")}
         </div>
-      `;
-    }
+      </div>` : "";
 
-    const vectorLabel = o.HasVector
-      ? `<span style="color:var(--emerald);">✓ ${o.VectorDims}d (${o.VectorModel ? (o.VectorModel.split('/').pop() || o.VectorModel) : ''})</span>`
-      : `<span style="color:var(--text-muted);">Sin vector</span>`;
-
-    elDrawerBody.innerHTML = `
-      <div class="drawer-meta-grid">
-        <div class="meta-field">
-          <span class="meta-field-label">Tipo</span>
-          <span class="meta-field-value"><span class="badge badge-${escapeHtml(o.Type)}">${escapeHtml(o.Type)}</span></span>
-        </div>
-        <div class="meta-field">
-          <span class="meta-field-label">Proyecto</span>
-          <span class="meta-field-value">${escapeHtml(o.Project || "—")}</span>
-        </div>
-        <div class="meta-field">
-          <span class="meta-field-label">Vector Semántico</span>
-          <span class="meta-field-value mono" style="font-size:11.5px;">${vectorLabel}</span>
-        </div>
-        <div class="meta-field">
-          <span class="meta-field-label">Topic Key</span>
-          <span class="meta-field-value mono">${escapeHtml(o.TopicKey || "—")}</span>
-        </div>
+    $("[data-drawer-body]").innerHTML = state.editing ? editForm(o) : `
+      <div class="kv">
+        <div><div class="kv-label">Type</div><div class="kv-value"><span class="chip" style="--chip:${hueOf(o.Type)}">${esc(o.Type)}</span></div></div>
+        <div><div class="kv-label">Vector</div><div class="kv-value" style="color:${o.HasVector ? "var(--healthy)" : "var(--fg-mute)"}">${o.HasVector ? `yes · ${o.VectorDims}d` : "not embedded"}</div></div>
+        <div><div class="kv-label">Session</div><div class="kv-value">${esc(o.SessionID || "—")}</div></div>
+        <div><div class="kv-label">Topic key</div><div class="kv-value">${esc(o.TopicKey || "—")}</div></div>
+        <div><div class="kv-label">Created</div><div class="kv-value">${esc(fmtDate(o.CreatedAt))}</div></div>
+        <div><div class="kv-label">Revisions</div><div class="kv-value">${o.RevisionCount} · ${o.DuplicateCount} seen</div></div>
       </div>
+      <div class="prose">${esc(o.Content)}</div>
+      ${rels}`;
 
-      <div class="drawer-content-box">${escapeHtml(o.Content)}</div>
+    $("[data-drawer-foot]").innerHTML = state.editing ? `
+      <button class="btn" data-cancel>Cancel</button>
+      <div class="drawer-actions"><button class="btn btn-primary" data-save>Save changes</button></div>`
+      : `<div class="drawer-actions">
+          <button class="btn" data-copy>Copy id</button>
+          <button class="btn" data-pin>${o.Pinned ? "Unpin" : "Pin"}</button>
+        </div>
+        <div class="drawer-actions">
+          <button class="btn" data-edit>Edit</button>
+          <button class="btn btn-danger" data-delete>Delete</button>
+        </div>`;
 
-      ${relsHtml}
-    `;
-
-    const pinLabel = o.Pinned ? "★ Desfijar" : "☆ Fijar";
-    elDrawerFooter.innerHTML = `
-      <div style="display: flex; gap: 8px;">
-        <button class="btn btn-secondary" onclick="window.copyMemory(${o.ID})">Copiar ID</button>
-        <button class="btn btn-secondary" onclick="window.togglePin(${o.ID}, ${o.Pinned})">${pinLabel}</button>
-      </div>
-      <div style="display: flex; gap: 8px;">
-        <button class="btn btn-secondary" onclick="window.startEditMemory()">Editar</button>
-        <button class="btn btn-danger" onclick="window.deleteMemory(${o.ID}, '${escapeHtml(o.Project)}')">Borrar</button>
-      </div>
-    `;
+    wireDrawer();
   }
 
-  function startEditMemory() {
-    const o = state.selectedMemory;
-    if (!o) return;
-    state.editingMemory = true;
-
-    elDrawerBody.innerHTML = `
-      <form class="edit-form" onsubmit="window.saveMemory(event)">
-        <div class="form-group">
-          <label class="form-label">Título</label>
-          <input type="text" id="edit-title" class="form-input" value="${escapeHtml(o.Title)}" required />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Tipo de Memoria</label>
-          <input type="text" id="edit-type" class="form-input" value="${escapeHtml(o.Type)}" required />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Contenido (Markdown)</label>
-          <textarea id="edit-content" class="form-textarea" required>${escapeHtml(o.Content)}</textarea>
-        </div>
-      </form>
-    `;
-
-    elDrawerFooter.innerHTML = `
-      <button class="btn btn-secondary" onclick="window.cancelEditMemory()">Cancelar</button>
-      <button class="btn btn-primary" onclick="window.saveMemory(event)">Guardar Cambios</button>
-    `;
+  function editForm(o) {
+    return `<div class="form">
+      <div class="form-row"><label for="e-title">Title</label><input id="e-title" value="${esc(o.Title)}"></div>
+      <div class="form-row"><label for="e-type">Type</label><input id="e-type" value="${esc(o.Type)}"></div>
+      <div class="form-row"><label for="e-content">Content (Markdown)</label><textarea id="e-content">${esc(o.Content)}</textarea></div>
+    </div>`;
   }
 
-  async function saveMemory(e) {
-    if (e) e.preventDefault();
-    const o = state.selectedMemory;
-    if (!o) return;
+  function wireDrawer() {
+    const body = $("[data-drawer-body]");
+    const foot = $("[data-drawer-foot]");
+    const o = state.memory;
 
-    const title = $("#edit-title").value.trim();
-    const type = $("#edit-type").value.trim();
-    const content = $("#edit-content").value.trim();
+    $$("[data-open]", body).forEach((b) => b.addEventListener("click", () => openMemory(b.dataset.open)));
 
+    const on = (sel, fn) => { const el = $(sel, foot); if (el) el.addEventListener("click", fn); };
+
+    on("[data-copy]", () => {
+      navigator.clipboard.writeText(String(o.ID));
+      toast(`Copied #${o.ID}`);
+    });
+    on("[data-pin]", async () => {
+      try {
+        await api(`/api/observations/${o.ID}/pin`, { method: o.Pinned ? "DELETE" : "PUT" });
+        toast(o.Pinned ? "Unpinned" : "Pinned");
+        await openMemory(o.ID);
+        if (state.view === "memories") loadMemories();
+      } catch (err) { toast(err.message, "error"); }
+    });
+    on("[data-edit]", () => { state.editing = true; renderDrawer(); });
+    on("[data-cancel]", () => { state.editing = false; renderDrawer(); });
+    on("[data-save]", saveMemory);
+    on("[data-delete]", deleteMemory);
+  }
+
+  async function saveMemory() {
+    const o = state.memory;
     try {
       await api(`/api/observations/${o.ID}`, {
         method: "PATCH",
         body: {
           expected_project: o.Project,
-          title,
-          type,
-          content,
+          title: $("#e-title", $("[data-drawer-body]")).value.trim(),
+          type: $("#e-type", $("[data-drawer-body]")).value.trim(),
+          content: $("#e-content", $("[data-drawer-body]")).value,
         },
       });
-      showToast("Memoria actualizada correctamente");
-      openMemory(o.ID);
-      if (state.currentView === "memories") loadMemories();
+      toast("Memory updated");
+      state.editing = false;
+      await openMemory(o.ID);
+      if (state.view === "memories") loadMemories();
     } catch (err) {
-      showToast(`Error al guardar: ${err.message}`, true);
+      toast(err.message, "error");
     }
   }
 
-  async function togglePin(id, currentPinned) {
+  async function deleteMemory() {
+    const o = state.memory;
+    if (!confirm(`Move memory #${o.ID} to the trash? It stays recoverable.`)) return;
     try {
-      await api(`/api/observations/${id}/pin`, {
-        method: currentPinned ? "DELETE" : "PUT",
-      });
-      showToast(currentPinned ? "Memoria desfijada" : "Memoria fijada");
-      openMemory(id);
-      if (state.currentView === "memories") loadMemories();
-    } catch (err) {
-      showToast(`Error fijando memoria: ${err.message}`, true);
-    }
-  }
-
-  async function deleteMemory(id, project) {
-    if (!confirm(`¿Deseas enviar la memoria #${id} a la papelera (soft-delete)?`)) {
-      return;
-    }
-    try {
-      await api(`/api/observations/${id}?expected_project=${encodeURIComponent(project)}`, {
-        method: "DELETE",
-      });
-      showToast(`Memoria #${id} eliminada`);
+      await api(`/api/observations/${o.ID}?expected_project=${encodeURIComponent(o.Project)}`, { method: "DELETE" });
+      toast(`Memory #${o.ID} deleted`);
       closeDrawer();
-      if (state.currentView === "memories") loadMemories();
+      if (state.view === "memories") loadMemories();
     } catch (err) {
-      showToast(`Error al eliminar: ${err.message}`, true);
+      toast(err.message, "error");
     }
   }
 
   async function markReviewed(id) {
     try {
       await api(`/api/observations/${id}/review`, { method: "POST" });
-      showToast(`Memoria #${id} marcada como revisada`);
-      if (state.currentView === "review") loadReviewQueue();
+      toast(`Memory #${id} marked reviewed`);
+      loadReview();
     } catch (err) {
-      showToast(`Error al revisar: ${err.message}`, true);
+      toast(err.message, "error");
     }
   }
 
-  function copyMemory(id) {
-    navigator.clipboard.writeText(String(id));
-    showToast(`ID #${id} copiado al portapapeles`);
-  }
+  // ---------------------------------------------------------------- chrome
 
-  // Global Attachments
-  window.setView = setView;
-  window.openMemory = openMemory;
-  window.openSessionTimeline = openSessionTimeline;
-  window.copyMemory = copyMemory;
-  window.togglePin = togglePin;
-  window.deleteMemory = deleteMemory;
-  window.startEditMemory = startEditMemory;
-  window.cancelEditMemory = () => openMemory(state.selectedMemory.ID);
-  window.saveMemory = saveMemory;
-  window.markReviewed = markReviewed;
-
-  window.onFilterChange = (key, val) => {
-    state.memoriesFilter[key] = val;
-    state.memoriesFilter.offset = 0;
-    loadMemories();
+  const VIEWS = {
+    overview: { title: "Overview", sub: "Shape, mix and momentum of the memory store", load: loadOverview, tools: true },
+    memories: { title: "Memories", sub: "Search, filter and manage observations", load: loadMemories },
+    relations: { title: "Relations", sub: "Judged links between memories, and what is still unjudged", load: loadRelations },
+    sessions: { title: "Sessions", sub: "Agent runs and the timeline each one produced", load: loadSessions },
+    review: { title: "Review", sub: "Memories carrying a scheduled review date", load: loadReview },
+    system: { title: "System & Health", sub: "Invariants, vector store and how this process is wired", load: loadSystem },
   };
 
-  window.filterByProject = (proj) => {
-    state.memoriesFilter.project = proj;
+  function setView(name) {
+    const v = VIEWS[name];
+    if (!v) return;
+    state.view = name;
+    $$(".nav-item").forEach((b) => {
+      if (b.dataset.view === name) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+    });
+    pageTitle.textContent = v.title;
+    pageSub.textContent = v.sub;
+    windowSwitch.hidden = !v.tools;
+    if (name !== "memories") state.filter.q = "";
+    searchInput.value = state.filter.q;
+    closeDrawer();
+    v.load();
+  }
+
+  async function pollHealth() {
+    const dot = $("[data-engine-dot]");
+    const label = $("[data-engine-label]");
+    try {
+      const data = await api("/api/health");
+      state.health = data;
+      const up = data.api_status === "connected";
+      dot.className = `dot ${up ? "dot-up" : "dot-down"}`;
+      label.textContent = up ? "engram serve connected" : "engram serve offline";
+      label.className = "engine-text";
+      label.style.color = up ? "var(--healthy)" : "var(--conflict)";
+      $("[data-db-size]").textContent = `db ${bytes(data.db_size)}`;
+      $("[data-wal-size]").textContent = `wal ${bytes(data.wal_size)}`;
+      const h = data.health || {};
+      $("[data-count='memories']").textContent = num(h.LiveObservations);
+      $("[data-count='sessions']").textContent = num(h.TotalSessions);
+      $("[data-count='relations']").textContent = num(data.relations);
+      $("[data-count='review']").textContent = num(data.review_pending);
+    } catch {
+      dot.className = "dot dot-wait";
+      label.textContent = "manager unreachable";
+      label.className = "engine-text";
+      label.style.color = "var(--pending)";
+    }
+  }
+
+  // ---------------------------------------------------------------- events
+
+  $$(".nav-item").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+  $("[data-refresh]").addEventListener("click", () => { VIEWS[state.view].load(); pollHealth(); });
+  $("[data-drawer-close]").addEventListener("click", closeDrawer);
+  backdrop.addEventListener("click", closeDrawer);
+
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    state.filter.q = searchInput.value.trim();
     setView("memories");
-  };
-
-  // Event Listeners
-  $$(".nav-item").forEach((btn) => {
-    btn.addEventListener("click", () => setView(btn.dataset.view));
   });
 
-  elDrawerClose.addEventListener("click", closeDrawer);
-  elDrawerBackdrop.addEventListener("click", closeDrawer);
+  $$("[data-window]").forEach((b) => b.addEventListener("click", () => {
+    state.window = b.dataset.window;
+    $$("[data-window]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    if (state.view === "overview" && state.overview) renderOverview();
+  }));
 
-  elBtnRefresh.addEventListener("click", () => {
-    checkEngineStatus();
-    setView(state.currentView);
-    showToast("Datos actualizados");
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { closeDrawer(); return; }
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if (typing) return;
+    if (e.key === "/") { e.preventDefault(); searchInput.focus(); }
+    if (e.key === "r" && !e.metaKey && !e.ctrlKey) { VIEWS[state.view].load(); pollHealth(); }
   });
 
-  elGlobalSearchInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      state.memoriesFilter.q = elGlobalSearchInput.value.trim();
-      setView("memories");
-    }
-  });
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      closeDrawer();
-    } else if (e.key === "/" && document.activeElement !== elGlobalSearchInput) {
-      e.preventDefault();
-      elGlobalSearchInput.focus();
-    }
-  });
-
-  // Initialization
-  checkEngineStatus();
+  pollHealth();
   setView("overview");
-  setInterval(checkEngineStatus, 15000);
+  setInterval(pollHealth, 20000);
 })();

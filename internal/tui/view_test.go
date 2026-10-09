@@ -52,8 +52,12 @@ func TestViewRendersList(t *testing.T) {
 	if strings.Contains(out, "loading memories…") {
 		t.Error("View still shows the initial loading status after items arrived")
 	}
-	if !strings.Contains(out, trunc(oneLine(items[0].Title), clamp(m.width/4, 16, 52))) {
-		t.Errorf("first title missing from the view:\n%s", out)
+	// Assert on the leading runes of the title, not on trunc(title, width):
+	// the row is laid out inside a bordered pane whose inner width is smaller
+	// than width/4, so reproducing that arithmetic here tested the layout
+	// instead of the behaviour, and only passed while titles stayed short.
+	if head := headRunes(oneLine(items[0].Title), 8); head != "" && !strings.Contains(out, head) {
+		t.Errorf("first title %q missing from the view:\n%s", head, out)
 	}
 	// Rows must fit the terminal; a long memory title or content must not wrap
 	// the layout into unreadable garbage.
@@ -197,4 +201,15 @@ func stripANSI(s string) string {
 		}
 	}
 	return out.String()
+}
+
+// headRunes returns the first n runes of s, or the whole string when it is
+// shorter. Used to assert that a value was rendered without depending on the
+// pane's exact truncation width.
+func headRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) < n {
+		return s
+	}
+	return string(r[:n])
 }
