@@ -40,6 +40,17 @@ const obsColumns = `
 const obsJoin = ` FROM observations o
 	LEFT JOIN sessions s ON s.id = o.session_id `
 
+// obsVectorColumn reports vector presence in the same round trip as the row,
+// so a list can show the badge without a query per memory. Without the table
+// the projection is a constant 0: a missing index must read as "no vector
+// store", never as a crash or a silent "not embedded" claim per row.
+func (s *Store) obsVectorColumn() string {
+	if !s.hasVectorTable() {
+		return ", 0"
+	}
+	return `, EXISTS(SELECT 1 FROM observation_embeddings e WHERE e.observation_id = o.id)`
+}
+
 func scanObservations(rows *sql.Rows) ([]Observation, error) {
 	defer rows.Close()
 	var out []Observation
@@ -51,6 +62,7 @@ func scanObservations(rows *sql.Rows) ([]Observation, error) {
 			&o.Pinned, &o.CreatedAt, &o.UpdatedAt, &o.DeletedAt,
 			&o.ReviewAfter, &o.ExpiresAt, &o.SyncID, &o.NormalizedHash,
 			&o.EmbeddingModel, &o.SessionEndedAt, &o.SessionDirector,
+			&o.HasVector,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan observation: %w", err)
@@ -98,7 +110,7 @@ func (s *Store) List(f Filter) ([]Observation, error) {
 		where = append(where, "o.deleted_at IS NULL")
 	}
 
-	q := "SELECT" + obsColumns + obsJoin
+	q := "SELECT" + obsColumns + s.obsVectorColumn() + obsJoin
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -122,7 +134,7 @@ func (s *Store) List(f Filter) ([]Observation, error) {
 
 // Get returns one observation by id, including soft-deleted rows.
 func (s *Store) Get(id int64) (Observation, error) {
-	rows, err := s.db.Query("SELECT"+obsColumns+obsJoin+" WHERE o.id = ?", id)
+	rows, err := s.db.Query("SELECT"+obsColumns+s.obsVectorColumn()+obsJoin+" WHERE o.id = ?", id)
 	if err != nil {
 		return Observation{}, fmt.Errorf("get observation %d: %w", id, err)
 	}
@@ -156,7 +168,7 @@ func (s *Store) GetByRef(ref string) (Observation, error) {
 	if id, err := strconv.ParseInt(ref, 10, 64); err == nil {
 		return s.Get(id)
 	}
-	rows, err := s.db.Query("SELECT"+obsColumns+obsJoin+" WHERE o.sync_id = ?", ref)
+	rows, err := s.db.Query("SELECT"+obsColumns+s.obsVectorColumn()+obsJoin+" WHERE o.sync_id = ?", ref)
 	if err != nil {
 		return Observation{}, fmt.Errorf("get observation by sync_id %q: %w", ref, err)
 	}
@@ -304,7 +316,7 @@ func (s *Store) Timeline(id int64, before, after int) ([]Observation, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query("SELECT"+obsColumns+obsJoin+`
+	rows, err := s.db.Query("SELECT"+obsColumns+s.obsVectorColumn()+obsJoin+`
 		WHERE o.deleted_at IS NULL
 		  AND ((o.session_id = ? AND o.created_at <= ? AND o.id <> ?)
 		    OR (o.session_id = ? AND o.created_at > ?))

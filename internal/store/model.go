@@ -35,9 +35,12 @@ type Observation struct {
 	EmbeddingModel  string
 	SessionEndedAt  string
 	SessionDirector string
-	HasVector       bool   `json:"has_vector,omitempty"`
-	VectorModel     string `json:"vector_model,omitempty"`
-	VectorDims      int    `json:"vector_dims,omitempty"`
+	// No json tags here on purpose: every other field in this payload is
+	// serialized under its Go name, and a snake_case exception on these three
+	// would silently break every client reading o.HasVector.
+	HasVector   bool
+	VectorModel string
+	VectorDims  int
 }
 
 // Deleted reports whether this observation was soft-deleted.
@@ -131,21 +134,21 @@ type Health struct {
 
 // MemoryRelation mirrors a row in memory_relations.
 type MemoryRelation struct {
-	ID              int64   `json:"id"`
-	SyncID          string  `json:"sync_id"`
-	SourceID        string  `json:"source_id"`
-	TargetID        string  `json:"target_id"`
-	Relation        string  `json:"relation"`
-	Reason          string  `json:"reason"`
-	Evidence        string  `json:"evidence"`
-	Confidence      float64 `json:"confidence"`
-	JudgmentStatus  string  `json:"judgment_status"`
-	MarkedByActor   string  `json:"marked_by_actor"`
-	MarkedByKind    string  `json:"marked_by_kind"`
-	MarkedByModel   string  `json:"marked_by_model"`
-	SessionID       string  `json:"session_id"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	ID             int64   `json:"id"`
+	SyncID         string  `json:"sync_id"`
+	SourceID       string  `json:"source_id"`
+	TargetID       string  `json:"target_id"`
+	Relation       string  `json:"relation"`
+	Reason         string  `json:"reason"`
+	Evidence       string  `json:"evidence"`
+	Confidence     float64 `json:"confidence"`
+	JudgmentStatus string  `json:"judgment_status"`
+	MarkedByActor  string  `json:"marked_by_actor"`
+	MarkedByKind   string  `json:"marked_by_kind"`
+	MarkedByModel  string  `json:"marked_by_model"`
+	SessionID      string  `json:"session_id"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
 
 	// Enriched fields from observation joins
 	SourceObsID   int64  `json:"source_obs_id,omitempty"`
@@ -169,11 +172,11 @@ type RelationsSummary struct {
 
 // ActivityStats aggregates observation creations across time windows and types.
 type ActivityStats struct {
-	Last24Hours  int            `json:"last_24h"`
-	Last7Days    int            `json:"last_7d"`
-	Last30Days   int            `json:"last_30d"`
-	ByType       map[string]int `json:"by_type"`
-	ByScope      map[string]int `json:"by_scope"`
+	Last24Hours int            `json:"last_24h"`
+	Last7Days   int            `json:"last_7d"`
+	Last30Days  int            `json:"last_30d"`
+	ByType      map[string]int `json:"by_type"`
+	ByScope     map[string]int `json:"by_scope"`
 }
 
 // EmbeddingStats reports vector store availability and coverage.
@@ -186,6 +189,32 @@ type EmbeddingStats struct {
 	Model         string  `json:"model"`
 	CoveragePct   float64 `json:"coverage_pct"`
 	LatestAt      string  `json:"latest_at"`
+}
+
+// DailyPoint is one calendar day of observation creation. Days with no
+// observations are present with Count zero, so a series can be plotted without
+// the UI having to reason about gaps.
+type DailyPoint struct {
+	Date  string `json:"date"`
+	Count int    `json:"count"`
+}
+
+// DailySeries is a gap-free run of daily creation counts plus the summary a
+// reader would otherwise compute by hand.
+type DailySeries struct {
+	Days       []DailyPoint `json:"days"`
+	Total      int          `json:"total"`
+	AvgPerDay  float64      `json:"avg_per_day"`
+	PeakCount  int          `json:"peak_count"`
+	PeakDate   string       `json:"peak_date"`
+	ActiveDays int          `json:"active_days"`
+}
+
+// TypeCount is one memory type and how many live observations carry it.
+type TypeCount struct {
+	Type  string  `json:"type"`
+	Count int     `json:"count"`
+	Pct   float64 `json:"pct"`
 }
 
 // Time helpers. Engram stores timestamps as SQLite datetime('now') strings,

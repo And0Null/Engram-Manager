@@ -8,115 +8,100 @@
 </head>
 <body>
   <div id="layout">
-    <!-- Sidebar Navigation -->
     <aside id="sidebar">
-      <div class="sidebar-header">
+      <div class="sidebar-head">
         <div class="brand">
-          <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="var(--cyan)"/>
-            <path d="M2 17l10 5 10-5" stroke="var(--magenta)"/>
-            <path d="M2 12l10 5 10-5" stroke="var(--teal)"/>
-          </svg>
-          <div class="brand-info">
-            <span class="brand-name">Engram</span>
-            <span class="brand-sub">Manager</span>
-          </div>
+          <span class="brand-mark">◈</span>
+          <span class="brand-name">Engram Manager</span>
         </div>
-        <span class="badge badge-codec">Pi Codec</span>
       </div>
 
       <nav id="nav">
-        <button class="nav-item active" data-view="overview">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+        <button class="nav-item" data-view="overview" aria-current="page">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
           <span>Overview</span>
         </button>
         <button class="nav-item" data-view="memories">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h12"/></svg>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
           <span>Memories</span>
-          <span class="nav-count" id="nav-count-memories">—</span>
+          <span class="nav-count" data-count="memories">—</span>
         </button>
         <button class="nav-item" data-view="relations">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5l7 7"/><circle cx="18" cy="6" r="3"/><path d="M8.5 15.5l7-7"/></svg>
-          <span>Relaciones</span>
-          <span class="nav-count" id="nav-count-relations">—</span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6h7M8.5 18h7M6 8.5v7M18 8.5v7"/></svg>
+          <span>Relations</span>
+          <span class="nav-count" data-count="relations">—</span>
         </button>
         <button class="nav-item" data-view="sessions">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span>Sesiones</span>
-          <span class="nav-count" id="nav-count-sessions">—</span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.5 2"/></svg>
+          <span>Sessions</span>
+          <span class="nav-count" data-count="sessions">—</span>
         </button>
         <button class="nav-item" data-view="review">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-          <span>Revisión</span>
-          <span class="nav-count" id="nav-count-review">—</span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 13l5 5L20 7"/></svg>
+          <span>Review</span>
+          <span class="nav-count" data-count="review">—</span>
         </button>
         <button class="nav-item" data-view="system">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-          <span>Sistema & Salud</span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          <span>System &amp; Health</span>
         </button>
       </nav>
 
-      <div class="sidebar-footer">
-        <div class="connection-status" id="engine-status">
-          <span class="status-dot dot-connecting" id="engine-dot"></span>
-          <span class="status-label" id="engine-label">Conectando...</span>
+      <div class="sidebar-foot">
+        <div class="engine">
+          <span class="dot dot-wait" data-engine-dot></span>
+          <span class="engine-text" data-engine-label>connecting…</span>
         </div>
-        <div class="db-stats" id="db-stats-meta">
-          <span id="db-size-label">DB: —</span>
-          <span id="wal-size-label">WAL: —</span>
+        <div class="foot-meta">
+          <span class="foot-chip" data-db-size>db —</span>
+          <span class="foot-chip" data-wal-size>wal —</span>
         </div>
       </div>
     </aside>
 
-    <!-- Main Content Area -->
     <main id="main">
       <header id="topbar">
-        <div class="topbar-title">
-          <h1 id="page-title">Overview</h1>
-          <span class="topbar-desc" id="page-subtitle">Panel general de memoria y métricas operativas</span>
+        <div>
+          <h1 class="page-title" data-page-title>Overview</h1>
+          <p class="page-sub" data-page-sub>Loading store…</p>
         </div>
-        <div class="topbar-actions">
-          <div class="search-box" id="global-search-box">
-            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="global-search-input" placeholder="Buscar trigrama en memorias... (/)" />
+        <div class="topbar-tools">
+          <div class="seg" data-window-switch hidden role="group" aria-label="Ventana de tiempo">
+            <button data-window="24h" aria-pressed="false">24h</button>
+            <button data-window="7d" aria-pressed="true">7d</button>
+            <button data-window="30d" aria-pressed="false">30d</button>
           </div>
-          <button class="btn btn-secondary" id="btn-refresh" title="Recargar datos">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            <span>Recargar</span>
+          <div class="field">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.5"/><path d="M20.5 20.5L16 16"/></svg>
+            <input type="search" data-search placeholder="Search memories…  /" aria-label="Search memories">
+          </div>
+          <button class="btn" data-refresh>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4.5V10H15"/></svg>
+            Refresh
           </button>
         </div>
       </header>
 
-      <div id="content">
-        <!-- Rendered dynamically by app.js -->
-        <div class="loading-state">
-          <div class="spinner"></div>
-          <span>Cargando datos de Engram...</span>
-        </div>
-      </div>
+      <div id="content"></div>
     </main>
   </div>
 
-  <!-- Detail Drawer for Memory inspection & editing -->
-  <div id="drawer-backdrop" class="backdrop hidden"></div>
-  <aside id="drawer" class="drawer hidden">
-    <div class="drawer-header">
-      <div class="drawer-title-group">
-        <span class="drawer-eyebrow" id="drawer-eyebrow">MEMORIA</span>
-        <h2 id="drawer-title">Detalle</h2>
+  <div class="backdrop" data-drawer-backdrop hidden></div>
+  <aside class="drawer" data-drawer hidden aria-label="Memory detail">
+    <div class="drawer-head">
+      <div>
+        <div class="drawer-ref" data-drawer-ref>—</div>
+        <h2 data-drawer-title>Detail</h2>
       </div>
-      <button class="btn-close" id="drawer-close" title="Cerrar (Esc)">&times;</button>
+      <button class="icon-btn" data-drawer-close aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
     </div>
-    <div class="drawer-body" id="drawer-body">
-      <!-- Content populated by app.js -->
-    </div>
-    <div class="drawer-footer" id="drawer-footer">
-      <!-- Action buttons -->
-    </div>
+    <div class="drawer-body" data-drawer-body></div>
+    <div class="drawer-foot" data-drawer-foot></div>
   </aside>
 
-  <!-- Notification Toast Container -->
-  <div id="toast-container"></div>
+  <div id="toasts" aria-live="polite"></div>
 
   <script src="/app.js"></script>
 </body>

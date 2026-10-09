@@ -197,7 +197,7 @@ func (s *Store) ReviewQueue(limit int) ([]Observation, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	q := "SELECT" + obsColumns + obsJoin + `
+	q := "SELECT" + obsColumns + s.obsVectorColumn() + obsJoin + `
 		WHERE o.deleted_at IS NULL
 		  AND o.review_after IS NOT NULL
 		  AND o.review_after <> ''
@@ -216,7 +216,7 @@ func (s *Store) SessionTimeline(sessionID string) ([]Observation, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
-	q := "SELECT" + obsColumns + obsJoin + `
+	q := "SELECT" + obsColumns + s.obsVectorColumn() + obsJoin + `
 		WHERE o.session_id = ? AND o.deleted_at IS NULL
 		ORDER BY o.created_at ASC, o.id ASC`
 

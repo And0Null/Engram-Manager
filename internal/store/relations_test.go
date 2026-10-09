@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"testing"
+	"time"
 )
 
 func createTestDB(t *testing.T) *Store {
@@ -284,5 +285,170 @@ func TestEmbeddingStats(t *testing.T) {
 	obs2, err := st.GetByRef("obs-2")
 	if err != nil || obs2.HasVector {
 		t.Errorf("obs2 should not have vector: %+v, err: %v", obs2, err)
+	}
+}
+
+func TestTypeCountsWindowAndPercentages(t *testing.T) {
+	st := createTestDB(t)
+	defer st.Close()
+
+	old := time.Now().UTC().AddDate(0, 0, -40).Format("2006-01-02 15:04:05")
+	_, err := st.db.Exec(`
+		INSERT INTO observations (type, title, content, created_at)
+		VALUES
+			('decision', 'a', 'x', ?),
+			('decision', 'b', 'x', ?),
+			('bugfix', 'c', 'x', datetime('now'));
+	`, old, old)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	all, err := st.TypeCounts(0)
+	if err != nil {
+		t.Fatalf("TypeCounts(0): %v", err)
+	}
+	if len(all) != 2 || all[0].Type != "decision" || all[0].Count != 2 {
+		t.Fatalf("all-time counts = %+v", all)
+	}
+	if diff := all[0].Pct - 66.66; diff > 0.01 || diff < -0.01 {
+		t.Errorf("decision pct = %v, want ~66.67", all[0].Pct)
+	}
+
+	week, err := st.TypeCounts(7 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("TypeCounts(7d): %v", err)
+	}
+	if len(week) != 1 || week[0].Type != "bugfix" {
+		t.Fatalf("7-day window should only see the fresh row, got %+v", week)
+	}
+	if week[0].Pct != 100 {
+		t.Errorf("single-type window pct = %v, want 100", week[0].Pct)
+	}
+}
+
+func TestDailyActivityIsGapFreeAndSummarizes(t *testing.T) {
+	st := createTestDB(t)
+	defer st.Close()
+
+	now := time.Now().UTC()
+	today := now.Format("2006-01-02 15:04:05")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02 15:04:05")
+	longAgo := now.AddDate(0, 0, -40).Format("2006-01-02 15:04:05")
+
+	_, err := st.db.Exec(`
+		INSERT INTO observations (type, title, content, created_at)
+		VALUES
+			('learning', 'today-1', 'x', ?),
+			('learning', 'today-2', 'x', ?),
+			('learning', 'today-3', 'x', ?),
+			('learning', 'yest', 'x', ?),
+			('learning', 'ancient', 'x', ?);
+	`, today, today, today, yesterday, longAgo)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	series, err := st.DailyActivity(30)
+	if err != nil {
+		t.Fatalf("DailyActivity: %v", err)
+	}
+	if len(series.Days) != 30 {
+		t.Fatalf("len(Days) = %d, want 30 (gap-free)", len(series.Days))
+	}
+	if series.Total != 4 {
+		t.Errorf("Total = %d, want 4 (the 40-day-old row is out of window)", series.Total)
+	}
+	if series.ActiveDays != 2 {
+		t.Errorf("ActiveDays = %d, want 2", series.ActiveDays)
+	}
+	if series.PeakCount != 3 {
+		t.Errorf("PeakCount = %d, want 3", series.PeakCount)
+	}
+	if series.PeakDate != now.Format("2006-01-02") {
+		t.Errorf("PeakDate = %q, want today", series.PeakDate)
+	}
+	if diff := series.AvgPerDay - 4.0/30.0; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("AvgPerDay = %v, want %v", series.AvgPerDay, 4.0/30.0)
+	}
+
+	// The last bucket must be today, so the strip always ends at "now".
+	last := series.Days[len(series.Days)-1]
+	if last.Date != now.Format("2006-01-02") {
+		t.Errorf("last day = %q, want today", last.Date)
+	}
+	if last.Count != 3 {
+		t.Errorf("today count = %d, want 3", last.Count)
+	}
+}
+
+func TestDailyActivityClampsLongRequests(t *testing.T) {
+	st := createTestDB(t)
+	defer st.Close()
+
+	series, err := st.DailyActivity(365)
+	if err != nil {
+		t.Fatalf("DailyActivity: %v", err)
+	}
+	if len(series.Days) != 90 {
+		t.Errorf("len(Days) = %d, want the 90-day clamp", len(series.Days))
+	}
+}
+
+// The list projection reports vector presence. A list that silently says
+// "not embedded" for every row is worse than no badge at all.
+func TestListCarriesVectorPresence(t *testing.T) {
+	st := createTestDB(t)
+	defer st.Close()
+
+	_, err := st.db.Exec(`
+		INSERT INTO observations (id, type, title, content)
+		VALUES (1, 'decision', 'embedded', 'x'), (2, 'decision', 'bare', 'x');
+		INSERT INTO observation_embeddings (observation_id, embedding, dimensions, model)
+		VALUES (1, X'0102', 384, 'test-minilm');
+	`)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	list, err := st.List(Filter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("len = %d, want 2", len(list))
+	}
+	byID := map[int64]Observation{}
+	for _, o := range list {
+		byID[o.ID] = o
+	}
+	if !byID[1].HasVector {
+		t.Error("memory 1 has a vector but List reported HasVector=false")
+	}
+	if byID[2].HasVector {
+		t.Error("memory 2 has no vector but List reported HasVector=true")
+	}
+}
+
+// A store with no vector store at all must still list, and must report every
+// row as un-embedded rather than failing the query.
+func TestListWithoutVectorTableDegrades(t *testing.T) {
+	st := createTestDB(t)
+	defer st.Close()
+
+	if _, err := st.db.Exec(`DROP TABLE observation_embeddings`); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	if _, err := st.db.Exec(`
+		INSERT INTO observations (type, title, content) VALUES ('decision','a','x')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	list, err := st.List(Filter{})
+	if err != nil {
+		t.Fatalf("List without a vector table must degrade, got: %v", err)
+	}
+	if len(list) != 1 || list[0].HasVector {
+		t.Errorf("list = %+v, want one row with HasVector=false", list)
 	}
 }

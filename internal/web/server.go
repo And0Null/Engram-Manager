@@ -130,13 +130,22 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emb, _ := s.store.EmbeddingStats()
+	// Nav counters live here so the sidebar never shows a number that belongs
+	// to a different measure.
+	relSum, _ := s.store.RelationsSummary()
+	var reviewTotal int
+	s.store.DB().QueryRow(`SELECT COUNT(*) FROM observations
+		WHERE deleted_at IS NULL AND review_after IS NOT NULL AND review_after <> ''`).
+		Scan(&reviewTotal)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"health":     h,
-		"db_size":    dbSize,
-		"wal_size":   walSize,
-		"api_status": apiStatus,
-		"embeddings": emb,
+		"health":         h,
+		"db_size":        dbSize,
+		"wal_size":       walSize,
+		"api_status":     apiStatus,
+		"embeddings":     emb,
+		"relations":      relSum.Total,
+		"review_pending": reviewTotal,
 	})
 }
 
@@ -163,6 +172,30 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	emb, _ := s.store.EmbeddingStats()
+	daily, err := s.store.DailyActivity(30)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	typesAll, err := s.store.TypeCounts(0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// All three windows ship together so the client can switch period without
+	// refetching, and so a shown number always has its window behind it.
+	windows := map[string][]store.TypeCount{}
+	for _, win := range []struct {
+		key  string
+		durt time.Duration
+	}{{"24h", 24 * time.Hour}, {"7d", 7 * 24 * time.Hour}, {"30d", 30 * 24 * time.Hour}} {
+		counts, err := s.store.TypeCounts(win.durt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		windows[win.key] = counts
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"health":     h,
@@ -170,6 +203,9 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"relations":  relSum,
 		"projects":   projects,
 		"embeddings": emb,
+		"daily":      daily,
+		"types_all":  typesAll,
+		"types":      windows,
 	})
 }
 
