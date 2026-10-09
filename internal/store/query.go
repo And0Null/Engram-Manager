@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -28,7 +29,7 @@ type Filter struct {
 // obsColumns is the shared projection, including the joined session columns so
 // a list row can show where a memory came from without a second query.
 const obsColumns = `
-	o.id, o.session_id, o.type, o.title, o.content, COALESCE(o.tool_name, ''), COALESCE(o.project, ''),
+	o.id, COALESCE(o.session_id, ''), o.type, o.title, o.content, COALESCE(o.tool_name, ''), COALESCE(o.project, ''),
 	o.scope, COALESCE(o.topic_key, ''), o.revision_count, o.duplicate_count, COALESCE(o.last_seen_at, ''),
 	o.pinned, o.created_at, o.updated_at, COALESCE(o.deleted_at, ''),
 	COALESCE(o.review_after, ''), COALESCE(o.expires_at, ''),
@@ -132,6 +133,41 @@ func (s *Store) Get(id int64) (Observation, error) {
 	if len(list) == 0 {
 		return Observation{}, fmt.Errorf("%w: %d", ErrNotFound, id)
 	}
+	s.enrichVector(&list[0])
+	return list[0], nil
+}
+
+func (s *Store) enrichVector(obs *Observation) {
+	var dims int
+	var model string
+	if err := s.db.QueryRow("SELECT dimensions, model FROM observation_embeddings WHERE observation_id = ?", obs.ID).Scan(&dims, &model); err == nil {
+		obs.HasVector = true
+		obs.VectorDims = dims
+		obs.VectorModel = model
+	}
+}
+
+// GetByRef resolves an observation either by numeric ID or by sync_id string.
+func (s *Store) GetByRef(ref string) (Observation, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return Observation{}, fmt.Errorf("%w: empty ref", ErrNotFound)
+	}
+	if id, err := strconv.ParseInt(ref, 10, 64); err == nil {
+		return s.Get(id)
+	}
+	rows, err := s.db.Query("SELECT"+obsColumns+obsJoin+" WHERE o.sync_id = ?", ref)
+	if err != nil {
+		return Observation{}, fmt.Errorf("get observation by sync_id %q: %w", ref, err)
+	}
+	list, err := scanObservations(rows)
+	if err != nil {
+		return Observation{}, err
+	}
+	if len(list) == 0 {
+		return Observation{}, fmt.Errorf("%w: %s", ErrNotFound, ref)
+	}
+	s.enrichVector(&list[0])
 	return list[0], nil
 }
 

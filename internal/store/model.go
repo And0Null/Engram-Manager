@@ -35,6 +35,9 @@ type Observation struct {
 	EmbeddingModel  string
 	SessionEndedAt  string
 	SessionDirector string
+	HasVector       bool   `json:"has_vector,omitempty"`
+	VectorModel     string `json:"vector_model,omitempty"`
+	VectorDims      int    `json:"vector_dims,omitempty"`
 }
 
 // Deleted reports whether this observation was soft-deleted.
@@ -124,6 +127,65 @@ type Health struct {
 	DuplicateCount         int
 	PinnedCount            int
 	ExpiringSoon           int
+}
+
+// MemoryRelation mirrors a row in memory_relations.
+type MemoryRelation struct {
+	ID              int64   `json:"id"`
+	SyncID          string  `json:"sync_id"`
+	SourceID        string  `json:"source_id"`
+	TargetID        string  `json:"target_id"`
+	Relation        string  `json:"relation"`
+	Reason          string  `json:"reason"`
+	Evidence        string  `json:"evidence"`
+	Confidence      float64 `json:"confidence"`
+	JudgmentStatus  string  `json:"judgment_status"`
+	MarkedByActor   string  `json:"marked_by_actor"`
+	MarkedByKind    string  `json:"marked_by_kind"`
+	MarkedByModel   string  `json:"marked_by_model"`
+	SessionID       string  `json:"session_id"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
+
+	// Enriched fields from observation joins
+	SourceObsID   int64  `json:"source_obs_id,omitempty"`
+	SourceTitle   string `json:"source_title,omitempty"`
+	SourceType    string `json:"source_type,omitempty"`
+	SourceProject string `json:"source_project,omitempty"`
+	TargetObsID   int64  `json:"target_obs_id,omitempty"`
+	TargetTitle   string `json:"target_title,omitempty"`
+	TargetType    string `json:"target_type,omitempty"`
+	TargetProject string `json:"target_project,omitempty"`
+}
+
+// RelationsSummary reports relation totals and grouped breakdowns.
+type RelationsSummary struct {
+	Total     int            `json:"total"`
+	ByKind    map[string]int `json:"by_kind"`
+	ByStatus  map[string]int `json:"by_status"`
+	Conflicts int            `json:"conflicts"`
+	Pending   int            `json:"pending"`
+}
+
+// ActivityStats aggregates observation creations across time windows and types.
+type ActivityStats struct {
+	Last24Hours  int            `json:"last_24h"`
+	Last7Days    int            `json:"last_7d"`
+	Last30Days   int            `json:"last_30d"`
+	ByType       map[string]int `json:"by_type"`
+	ByScope      map[string]int `json:"by_scope"`
+}
+
+// EmbeddingStats reports vector store availability and coverage.
+type EmbeddingStats struct {
+	Available     bool    `json:"available"`
+	TotalEmbedded int     `json:"total_embedded"`
+	LiveCount     int     `json:"live_count"`
+	PendingCount  int     `json:"pending_count"`
+	Dimensions    int     `json:"dimensions"`
+	Model         string  `json:"model"`
+	CoveragePct   float64 `json:"coverage_pct"`
+	LatestAt      string  `json:"latest_at"`
 }
 
 // Time helpers. Engram stores timestamps as SQLite datetime('now') strings,
