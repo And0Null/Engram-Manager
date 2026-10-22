@@ -1,1 +1,7 @@
 bin/
+# Local AI runtime state
+.atl/
+.pi/
+
+# Raw, auto-generated session log. The curated record lives in Engram.
+docs/chronicle/
