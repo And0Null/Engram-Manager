@@ -49,7 +49,6 @@
   const pageTitle = $("[data-page-title]");
   const pageSub = $("[data-page-sub]");
   const searchInput = $("[data-search]");
-  const windowSwitch = $("[data-window-switch]");
   const drawer = $("[data-drawer]");
   const backdrop = $("[data-drawer-backdrop]");
 
@@ -467,7 +466,11 @@
       <article class="card activity-card">
         <header class="card-header">
           <div><h2 class="card-title">Daily activity</h2><p class="card-subtitle" id="activity-window">${esc(windowLabel())}</p></div>
-          <div class="header-actions"><span class="count-badge">${esc(state.window)}</span></div>
+          <div class="header-actions">
+            <div class="seg" role="group" aria-label="Chart range">
+              ${["24h", "7d", "30d"].map((w) => `<button type="button" data-window="${w}" aria-pressed="${w === state.window}">${w}</button>`).join("")}
+            </div>
+          </div>
         </header>
         <div class="chart-wrap">
           <div class="chart-legend">
@@ -1118,7 +1121,6 @@
     });
     pageTitle.textContent = v.title;
     pageSub.textContent = v.sub;
-    windowSwitch.hidden = !v.tools;
     if (name !== "memories") state.filter.q = "";
     searchInput.value = state.filter.q;
     closeDrawer();
@@ -1161,7 +1163,7 @@
 
   // ---------------------------------------------------------------- events
 
-  $$(".nav-item").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+      $$(".nav-item").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
   $("[data-refresh]").addEventListener("click", () => { VIEWS[state.view].load(); pollHealth(); });
   $("[data-drawer-close]").addEventListener("click", closeDrawer);
   backdrop.addEventListener("click", closeDrawer);
@@ -1172,13 +1174,20 @@
     setView("memories");
   });
 
-  $$("[data-window]").forEach((b) => b.addEventListener("click", () => {
-    state.window = b.dataset.window;
+  // The range control lives in the chart card, next to the data it changes, and
+  // is delegated so a re-render never leaves it unwired.
+  function setWindow(next) {
+    if (!next || next === state.window) return;
+    state.window = next;
     // A dashboard range selection resets the type card to the same range.
     state.typePeriod = "range";
-    $$("[data-window]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
     if (state.view === "overview" && state.overview) renderOverview();
-  }));
+  }
+
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-window]");
+    if (b) setWindow(b.dataset.window);
+  });
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { closeDrawer(); return; }
