@@ -361,11 +361,6 @@ input.filter::placeholder { color: var(--text-muted); }
 .card-title { font-size: 16px; font-weight: 550; letter-spacing: -0.01em; }
 .card-subtitle { margin-top: 2px; color: var(--text-muted); font-size: 11px; }
 .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.count-badge {
-  min-width: 28px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 6px;
-  color: var(--text-secondary); text-align: right;
-  font-family: var(--font-mono); font-size: 11px; line-height: 18px; font-variant-numeric: tabular-nums;
-}
 
 /* Activity chart — the hero. One bar per bucket, only the peak carries the
    interaction accent; every bar is focusable and selectable, not hover-only. */
