@@ -160,6 +160,57 @@ func TestRelationsAndSummary(t *testing.T) {
 	}
 }
 
+func TestRelationsResolveEndpointsBySyncIDOrNumericID(t *testing.T) {
+	st := createTestDB(t)
+	defer st.Close()
+
+	_, err := st.db.Exec(`
+		INSERT INTO observations (id, type, title, content, sync_id)
+		VALUES
+			(101, 'decision', 'By sync', 'x', 'sync-abc'),
+			(102, 'bugfix', 'By number', 'x', 'sync-def');
+	`)
+	if err != nil {
+		t.Fatalf("seed observations: %v", err)
+	}
+	_, err = st.db.Exec(`
+		INSERT INTO memory_relations (sync_id, source_id, target_id, relation, judgment_status)
+		VALUES
+			('r-sync', 'sync-abc', '102', 'related', 'judged'),
+			('r-padded', '0102', 'sync-abc', 'related', 'judged'),
+			('r-suffix', '102abc', 'sync-abc', 'related', 'judged');
+	`)
+	if err != nil {
+		t.Fatalf("seed relations: %v", err)
+	}
+
+	rels, err := st.Relations(RelationFilter{})
+	if err != nil {
+		t.Fatalf("Relations(): %v", err)
+	}
+	bySync := map[string]MemoryRelation{}
+	for _, r := range rels {
+		bySync[r.SyncID] = r
+	}
+
+	// The sync_id path and the numeric-id fallback must both resolve.
+	sync := bySync["r-sync"]
+	if sync.SourceTitle != "By sync" || sync.SourceObsID != 101 {
+		t.Errorf("sync_id endpoint = (%q, %d), want (By sync, 101)", sync.SourceTitle, sync.SourceObsID)
+	}
+	if sync.TargetTitle != "By number" || sync.TargetObsID != 102 {
+		t.Errorf("numeric endpoint = (%q, %d), want (By number, 102)", sync.TargetTitle, sync.TargetObsID)
+	}
+
+	// A padded or suffixed id is not the same id. The numeric path is indexed
+	// on the integer, so the text comparison is what keeps this exact.
+	for _, id := range []string{"r-padded", "r-suffix"} {
+		if r := bySync[id]; r.SourceObsID != 0 || r.SourceTitle != "" {
+			t.Errorf("%s source resolved to (%q, %d), want no match", id, r.SourceTitle, r.SourceObsID)
+		}
+	}
+}
+
 func TestSessionTimelineAndPrompts(t *testing.T) {
 	st := createTestDB(t)
 	defer st.Close()
