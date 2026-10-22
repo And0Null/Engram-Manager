@@ -54,11 +54,24 @@ func (s *Store) Relations(f RelationFilter) ([]MemoryRelation, error) {
 			COALESCE(r.marked_by_actor, ''), COALESCE(r.marked_by_kind, ''),
 			COALESCE(r.marked_by_model, ''), COALESCE(r.session_id, ''),
 			r.created_at, r.updated_at,
-			COALESCE(osrc.id, 0), COALESCE(osrc.title, ''), COALESCE(osrc.type, ''), COALESCE(osrc.project, ''),
-			COALESCE(otgt.id, 0), COALESCE(otgt.title, ''), COALESCE(otgt.type, ''), COALESCE(otgt.project, '')
+			COALESCE(os_sync.id, os_id.id, 0), COALESCE(os_sync.title, os_id.title, ''),
+			COALESCE(os_sync.type, os_id.type, ''), COALESCE(os_sync.project, os_id.project, ''),
+			COALESCE(ot_sync.id, ot_id.id, 0), COALESCE(ot_sync.title, ot_id.title, ''),
+			COALESCE(ot_sync.type, ot_id.type, ''), COALESCE(ot_sync.project, ot_id.project, '')
 		FROM memory_relations r
-		LEFT JOIN observations osrc ON (osrc.sync_id = r.source_id OR CAST(osrc.id AS TEXT) = r.source_id)
-		LEFT JOIN observations otgt ON (otgt.sync_id = r.target_id OR CAST(otgt.id AS TEXT) = r.target_id)`
+		-- An endpoint id is either an observation sync_id or a numeric id. One
+		-- OR-ed join expresses that in a single condition and defeats every
+		-- index: the planner scans the sync_id index once per relation row
+		-- (1,662 here, measured ~1s; with SetMaxOpenConns(1) that stalls every
+		-- other view). Two equality joins give it one probe each. The text check
+		-- on the numeric side keeps the original exactness, so "0102" and
+		-- "102abc" still never resolve to observation 102.
+		LEFT JOIN observations os_sync ON os_sync.sync_id = r.source_id
+		LEFT JOIN observations os_id ON os_id.id = CAST(r.source_id AS INTEGER)
+			AND CAST(os_id.id AS TEXT) = r.source_id
+		LEFT JOIN observations ot_sync ON ot_sync.sync_id = r.target_id
+		LEFT JOIN observations ot_id ON ot_id.id = CAST(r.target_id AS INTEGER)
+			AND CAST(ot_id.id AS TEXT) = r.target_id`
 
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
