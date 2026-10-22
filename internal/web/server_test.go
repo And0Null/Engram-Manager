@@ -94,6 +94,85 @@ func createTestStore(t *testing.T) *store.Store {
 	return store.NewForTest(db)
 }
 
+// The Overview chart has three ranges, and the 24h one reads hourly buckets.
+// If that field silently disappears the chart renders empty while the API still
+// answers 200, so the contract is asserted here instead of in a browser.
+func TestOverviewPayloadCarriesHourlySeries(t *testing.T) {
+	st := createTestStore(t)
+	defer st.Close()
+
+	_, err := st.DB().Exec(`
+		INSERT INTO sessions (id, project) VALUES ('s1', 'proj-alpha');
+		INSERT INTO observations (id, session_id, type, title, content, project, created_at)
+		VALUES
+			(201, 's1', 'discovery', 'hourly seed', 'body', 'proj-alpha', datetime('now')),
+			(202, 's1', 'bugfix', 'three days ago', 'body', 'proj-alpha', datetime('now', '-3 days'));
+	`)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	srv, err := NewServer(st, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/overview")
+	if err != nil {
+		t.Fatalf("GET /api/overview: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+
+	var payload struct {
+		Daily  store.DailySeries            `json:"daily"`
+		Hourly store.HourlySeries           `json:"hourly"`
+		Types  map[string][]store.TypeCount `json:"types"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode overview: %v", err)
+	}
+	if len(payload.Daily.Days) != 30 {
+		t.Errorf("len(daily.days) = %d, want 30", len(payload.Daily.Days))
+	}
+	if len(payload.Hourly.Hours) != 24 {
+		t.Fatalf("len(hourly.hours) = %d, want 24 (the chart's 24h range)", len(payload.Hourly.Hours))
+	}
+	last := payload.Hourly.Hours[len(payload.Hourly.Hours)-1]
+	if last.Count != 1 || payload.Hourly.Total != 1 {
+		t.Errorf("current hour count = %d (total %d), want 1 — the seeded row", last.Count, payload.Hourly.Total)
+	}
+
+	// A range's type total must equal the bars drawn under it: the summary and
+	// the chart are read together, so two definitions of "7 days" would show
+	// two different numbers for the same window.
+	sum := func(counts []store.TypeCount) int {
+		n := 0
+		for _, c := range counts {
+			n += c.Count
+		}
+		return n
+	}
+	if got, want := sum(payload.Types["24h"]), payload.Hourly.Total; got != want {
+		t.Errorf("types[24h] = %d, want %d (the hourly bars)", got, want)
+	}
+	last7 := payload.Daily.Days[len(payload.Daily.Days)-7:]
+	weekTotal := 0
+	for _, d := range last7 {
+		weekTotal += d.Count
+	}
+	if got := sum(payload.Types["7d"]); got != weekTotal {
+		t.Errorf("types[7d] = %d, want %d (the last 7 daily bars)", got, weekTotal)
+	}
+	if got := sum(payload.Types["30d"]); got != payload.Daily.Total {
+		t.Errorf("types[30d] = %d, want %d (all 30 daily bars)", got, payload.Daily.Total)
+	}
+}
+
 func TestServerEndpoints(t *testing.T) {
 	st := createTestStore(t)
 	defer st.Close()

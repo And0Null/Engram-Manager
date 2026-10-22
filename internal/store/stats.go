@@ -226,12 +226,22 @@ func (s *Store) RecentActivity(window time.Duration, limit int) ([]Observation, 
 // TypeCounts returns live observations per type inside a window, biggest first.
 // A zero window means "all time", which is the distribution the store holds.
 func (s *Store) TypeCounts(window time.Duration) ([]TypeCount, error) {
+	if window <= 0 {
+		return s.TypeCountsSince(time.Time{})
+	}
+	return s.TypeCountsSince(time.Now().UTC().Add(-window))
+}
+
+// TypeCountsSince counts types created at or after `since`; a zero value means
+// all time. The Overview uses it with the same bucket boundaries as the daily
+// and hourly series, so a range's type total equals the bars drawn under it.
+func (s *Store) TypeCountsSince(since time.Time) ([]TypeCount, error) {
 	q := `SELECT type, COUNT(*) FROM observations
 		WHERE deleted_at IS NULL AND type IS NOT NULL AND type <> ''`
 	var args []any
-	if window > 0 {
+	if !since.IsZero() {
 		q += " AND created_at >= ?"
-		args = append(args, time.Now().UTC().Add(-window).Format(sqliteTimeLayout))
+		args = append(args, since.Format(sqliteTimeLayout))
 	}
 	q += " GROUP BY type ORDER BY 2 DESC, 1 ASC"
 
@@ -321,6 +331,61 @@ func (s *Store) DailyActivity(days int) (DailySeries, error) {
 	return out, nil
 }
 
+// HourlyActivity buckets observation creations by clock hour over the last
+// `hours` hours, oldest first. It is the 24h counterpart of DailyActivity and
+// keeps the same gap-free contract, so the chart's two ranges can never
+// disagree about what a bucket is or where the series ends.
+func (s *Store) HourlyActivity(hours int) (HourlySeries, error) {
+	var out HourlySeries
+	if hours <= 0 {
+		hours = 24
+	}
+	if hours > 72 {
+		hours = 72
+	}
+
+	// The window ends at the start of the next hour rather than at the current
+	// instant: this hour is partial, and it is the one being written to now.
+	endExclusive := time.Now().UTC().Truncate(time.Hour).Add(time.Hour)
+	start := endExclusive.Add(-time.Duration(hours) * time.Hour)
+
+	rows, err := s.db.Query(`
+		SELECT substr(created_at, 1, 13) AS h, COUNT(*)
+		FROM observations
+		WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ?
+		GROUP BY h`, start.Format(sqliteTimeLayout), endExclusive.Format(sqliteTimeLayout))
+	if err != nil {
+		return out, fmt.Errorf("hourly activity: %w", err)
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var h string
+		var n int
+		if err := rows.Scan(&h, &n); err != nil {
+			return out, fmt.Errorf("scan hourly activity: %w", err)
+		}
+		counts[h] = n
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	out.Hours = make([]HourlyPoint, 0, hours)
+	for i := 0; i < hours; i++ {
+		key := start.Add(time.Duration(i) * time.Hour).Format("2006-01-02 15")
+		n := counts[key]
+		out.Hours = append(out.Hours, HourlyPoint{Hour: key + ":00", Count: n})
+		out.Total += n
+		if n > out.PeakCount {
+			out.PeakCount, out.PeakHour = n, key+":00"
+		}
+	}
+	out.AvgPerHour = float64(out.Total) / float64(hours)
+	return out, nil
+}
+
 // DBSize returns the on-disk size of the database, its WAL, and their sum.
 // The WAL is the interesting half: it is where unmerged writes live, and it
 // is routinely larger than the database itself.
@@ -382,4 +447,3 @@ func (s *Store) EmbeddingStats() (EmbeddingStats, error) {
 
 	return stats, nil
 }
-

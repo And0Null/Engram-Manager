@@ -177,19 +177,33 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	hourly, err := s.store.HourlyActivity(24)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	typesAll, err := s.store.TypeCounts(0)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// All three windows ship together so the client can switch period without
-	// refetching, and so a shown number always has its window behind it.
+	// refetching, and so a shown number always has its window behind it. The
+	// boundaries are the chart's own: the hourly bucket start, and the first
+	// midnight of the 7- and 30-day daily series. A rolling duration here would
+	// make a range's type total disagree with the bars directly above it.
+	now := time.Now().UTC()
+	today := now.Truncate(24 * time.Hour)
 	windows := map[string][]store.TypeCount{}
 	for _, win := range []struct {
-		key  string
-		durt time.Duration
-	}{{"24h", 24 * time.Hour}, {"7d", 7 * 24 * time.Hour}, {"30d", 30 * 24 * time.Hour}} {
-		counts, err := s.store.TypeCounts(win.durt)
+		key   string
+		since time.Time
+	}{
+		{"24h", now.Truncate(time.Hour).Add(-23 * time.Hour)},
+		{"7d", today.AddDate(0, 0, -6)},
+		{"30d", today.AddDate(0, 0, -29)},
+	} {
+		counts, err := s.store.TypeCountsSince(win.since)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -204,6 +218,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"projects":   projects,
 		"embeddings": emb,
 		"daily":      daily,
+		"hourly":     hourly,
 		"types_all":  typesAll,
 		"types":      windows,
 	})
