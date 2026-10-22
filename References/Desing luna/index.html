@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Overview · Engram Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --app: #101216; --surface: #171a20; --elevated: #20242c;
+      --border: #2b303a; --border-strong: #3a414d;
+      --text: #f1f3f6; --text-secondary: #b0b7c3; --text-muted: #8992a1;
+      --accent: #78a9ff; --accent-strong: #9bc0ff;
+      --success: #56c596; --warning: #f0b55c; --danger: #f07878; --info: #6bb9df;
+      --type-session-summary: #93a4ba; --type-discovery: #56c5b7;
+      --type-decision: #b99af7; --type-config: #68a6f0; --type-bugfix: #e47878;
+      --type-pattern: #d58bc9; --type-architecture: #7bc77f;
+      --type-feature: #d89a59; --type-other: #7f8793;
+      --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+      --display-size: 40px; --display-line: 44px; --h1-size: 24px; --h2-size: 16px;
+      --body-size: 14px; --caption-size: 12px;
+      --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+      --space-5: 20px; --space-6: 24px; --space-8: 32px;
+      --radius-control: 8px; --radius-card: 12px; --sidebar-width: 240px;
+      --focus-ring: 0 0 0 3px #78a9ff59;
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    [hidden]{display:none!important}
+    body{margin:0;min-width:320px;background:var(--app);color:var(--text);font:400 var(--body-size)/1.6 var(--font-ui)}
+    button,input{color:inherit;font:inherit}button,a{cursor:pointer}button:focus-visible,input:focus-visible,a:focus-visible{outline:0;box-shadow:var(--focus-ring)}
+    .app-shell{min-height:100vh}.sidebar{position:fixed;inset:0 auto 0 0;z-index:3;display:flex;width:var(--sidebar-width);flex-direction:column;padding:20px 14px 16px;background:var(--surface);border-right:1px solid var(--border)}
+    .brand{display:flex;align-items:center;gap:11px;padding:0 10px 28px;font-size:15px;font-weight:650;letter-spacing:-.02em}.brand-mark{display:grid;width:28px;height:28px;place-items:center;border:1px solid #526078;border-radius:8px;color:var(--accent-strong);font:600 15px/1 var(--font-mono)}
+    .nav-label{padding:0 10px 8px;color:var(--text-muted);font-size:var(--caption-size)}.nav-list{display:grid;gap:4px}.nav-item{display:flex;min-height:38px;align-items:center;justify-content:space-between;gap:12px;padding:0 10px;border:1px solid transparent;border-radius:var(--radius-control);color:var(--text-secondary);text-decoration:none;transition:background-color 140ms ease,color 140ms ease}.nav-item:hover{background:var(--elevated);color:var(--text)}.nav-item[aria-current=page]{background:#242c38;border-color:#37465c;color:var(--text)}.nav-copy{display:flex;align-items:center;gap:10px}.nav-glyph{display:inline-grid;width:16px;height:16px;place-items:center;color:var(--text-muted);font:500 12px/1 var(--font-mono)}.nav-item[aria-current=page] .nav-glyph{color:var(--accent-strong)}
+    .count{min-width:28px;padding:1px 6px;border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);text-align:right;font:500 11px/18px var(--font-mono);font-variant-numeric:tabular-nums}.count.review{border-color:#604c30;background:#30271b;color:#ffd18a}.sidebar-spacer{flex:1}.connection-card{display:grid;gap:10px;padding:13px 12px;border:1px solid var(--border);border-radius:10px;background:var(--app)}.connection-title{display:flex;align-items:center;gap:8px;color:var(--text);font-size:12px;font-weight:550}.status-dot{width:8px;height:8px;flex:0 0 auto;border-radius:50%;background:var(--success)}.connection-meta{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;color:var(--text-muted);font-size:11px}.wal-warning{color:var(--warning)}.connection-meta strong{color:var(--text-secondary);font:500 11px var(--font-mono);font-variant-numeric:tabular-nums}
+    .main{min-height:100vh;margin-left:var(--sidebar-width)}.topbar{position:sticky;top:0;z-index:2;display:flex;min-height:88px;align-items:center;justify-content:space-between;gap:20px;padding:16px 28px;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--app) 94%,transparent);backdrop-filter:blur(12px)}.page-heading h1{margin:0;font-size:var(--h1-size);font-weight:600;letter-spacing:-.025em;line-height:1.25}.page-heading p{margin:4px 0 0;color:var(--text-secondary);font-size:13px}.toolbar{display:flex;align-items:center;gap:10px}.sample-badge{display:inline-flex;min-height:25px;align-items:center;gap:6px;padding:2px 8px;border:1px solid #68512f;border-radius:999px;background:#302719;color:#ffd18a;font-size:11px;font-weight:500;white-space:nowrap}.segmented{display:inline-flex;padding:3px;border:1px solid var(--border);border-radius:var(--radius-control);background:var(--surface)}.segment{min-width:43px;min-height:30px;padding:4px 9px;border:0;border-radius:6px;background:transparent;color:var(--text-secondary);font-size:12px}.segment:hover{color:var(--text)}.segment[aria-pressed=true]{background:var(--elevated);color:var(--text);box-shadow:inset 0 0 0 1px var(--border-strong)}
+    .search{display:flex;width:204px;height:38px;align-items:center;gap:8px;padding:0 8px 0 11px;border:1px solid var(--border);border-radius:var(--radius-control);background:var(--surface)}.search-icon{color:var(--text-muted);font-size:15px}.search input{width:100%;min-width:0;border:0;outline:0;background:transparent;font-size:12px}.search input::placeholder{color:var(--text-muted)}.search kbd{padding:0 5px;border:1px solid var(--border-strong);border-radius:4px;color:var(--text-muted);font:11px var(--font-mono)}.button{display:inline-flex;min-height:36px;align-items:center;justify-content:center;gap:7px;padding:0 12px;border:1px solid var(--border-strong);border-radius:var(--radius-control);background:var(--elevated);color:var(--text);font-size:12px;font-weight:550;transition:background-color 140ms ease,border-color 140ms ease}.button:hover{border-color:#596373;background:#2a303a}.button:disabled{cursor:not-allowed;opacity:.55}
+    .content{display:grid;max-width:1600px;gap:20px;margin:0 auto;padding:24px 28px 32px}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.card{min-width:0;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}.kpi-card{display:grid;min-height:132px;align-content:space-between;gap:14px;padding:18px 20px}.kpi-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.kpi-label{color:var(--text-secondary);font-size:13px}.kpi-label-link{display:flex;min-height:24px;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--text-secondary);text-align:left;text-decoration:none}.kpi-label-link:hover .kpi-label{color:var(--text)}.kpi-value{color:var(--text);font:500 29px/1.1 var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-.05em}.kpi-foot{display:flex;align-items:center;gap:7px;color:var(--text-muted);font-size:11px}.delta{display:inline-flex;align-items:center;gap:4px;font:500 11px var(--font-mono);font-variant-numeric:tabular-nums}.delta.up{color:var(--success)}.delta.down{color:var(--danger)}.delta.neutral{color:var(--text-muted)}.pending-marker{display:inline-flex;align-items:center;gap:5px;color:var(--warning);font-size:11px}.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+    .card-header{display:flex;min-height:58px;align-items:center;justify-content:space-between;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border)}.card-title{margin:0;font-size:var(--h2-size);font-weight:550;letter-spacing:-.01em}.card-subtitle{margin:2px 0 0;color:var(--text-muted);font-size:11px}.header-actions{display:flex;align-items:center;gap:8px}.small-select{min-height:30px;padding:4px 8px;border:1px solid var(--border);border-radius:7px;background:var(--app);color:var(--text-secondary);font-size:11px}.toggle-label{display:inline-flex;min-height:32px;align-items:center;gap:7px;color:var(--text-secondary);font-size:11px;cursor:pointer}.toggle-label input{width:15px;height:15px;accent-color:var(--accent)}
+    .activity-card{min-height:260px}.chart-wrap{padding:14px 18px 14px}.chart-legend{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:0 4px 8px;color:var(--text-secondary);font-size:11px}.legend-item{display:inline-flex;align-items:center;gap:6px}.legend-swatch{width:9px;height:9px;border-radius:2px;background:#647184}.legend-swatch.peak{background:var(--accent)}.legend-line{width:14px;border-top:1px dashed var(--text-muted)}.activity-chart{display:block;width:100%;height:190px;overflow:visible}.chart-grid{stroke:#2b303a;stroke-width:1}.chart-axis{fill:var(--text-muted);font:10px var(--font-mono)}.chart-average{stroke:#8992a1;stroke-width:1.2;stroke-dasharray:4 4}.chart-average-label{fill:var(--text-secondary);stroke:var(--surface);stroke-width:5px;stroke-linejoin:round;paint-order:stroke;font:10px var(--font-mono)}.chart-bar{fill:#516174;cursor:pointer}.chart-bar.peak{fill:var(--accent)}.chart-bar:hover{fill:#78869a}.chart-bar.peak:hover{fill:var(--accent-strong)}.chart-bar:focus{outline:none;stroke:#f1f3f6;stroke-width:2}.chart-note{display:flex;justify-content:space-between;gap:12px;padding:7px 4px 0;border-top:1px solid var(--border);color:var(--text-muted);font-size:11px}.chart-note strong{color:var(--text-secondary);font-weight:500}.chart-selected{min-height:20px;color:var(--text-secondary);font-size:11px}.tooltip{position:fixed;z-index:5;display:none;max-width:220px;padding:8px 10px;border:1px solid var(--border-strong);border-radius:7px;background:var(--elevated);box-shadow:0 8px 24px #0006;color:var(--text);font-size:11px;pointer-events:none}.tooltip.visible{display:grid;gap:2px}.tooltip span{color:var(--text-secondary)}.inline-state{display:flex;min-height:110px;align-items:center;justify-content:center;padding:20px;color:var(--text-secondary);text-align:center;font-size:12px}.inline-state strong{display:block;margin-bottom:4px;color:var(--text);font-weight:550}
+    .lower-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);gap:16px;align-items:start}.type-list{padding:8px 18px 18px}.type-row{display:grid;grid-template-columns:minmax(132px,180px) minmax(60px,1fr) 48px 44px;min-height:42px;align-items:center;gap:10px;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent)}.type-chip{display:inline-flex;width:max-content;max-width:100%;align-items:center;gap:7px;overflow:hidden;color:var(--text-secondary);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.type-dot{width:8px;height:8px;flex:0 0 auto;border-radius:2px;background:var(--type-color)}.bar-track{display:block;height:8px;overflow:hidden;border-radius:5px;background:#292e37}.bar-fill{display:block;width:var(--bar-width);height:100%;border-radius:inherit;background:var(--type-color)}.type-count,.type-share{text-align:right;font:11px var(--font-mono);font-variant-numeric:tabular-nums}.type-count{color:var(--text)}.type-share{color:var(--text-muted)}.type-empty{grid-column:1/-1}
+    .system-stack{display:grid;gap:12px;padding:16px}.system-item{display:grid;gap:7px;padding-bottom:12px;border-bottom:1px solid var(--border)}.system-item:last-child{padding-bottom:0;border-bottom:0}.system-label{color:var(--text-muted);font-size:11px}.system-value{display:flex;align-items:center;gap:8px;color:var(--text);font-size:12px}.health-pill{display:inline-flex;width:max-content;min-height:25px;align-items:center;gap:6px;padding:2px 8px;border:1px solid #285d49;border-radius:999px;background:#172a23;color:#8be0b7;font-size:11px}.health-pill.warn{border-color:#68512f;background:#302719;color:#ffd18a}.model-name{overflow-wrap:anywhere;color:var(--text-secondary);font:11px/1.5 var(--font-mono)}.progress-track{width:100%;height:5px;overflow:hidden;border-radius:5px;background:#292e37}.progress-fill{height:100%;background:var(--success)}
+    .skeleton{position:relative;overflow:hidden;background:#272c35;color:transparent;border-radius:5px}.skeleton::after{position:absolute;inset:0;background:linear-gradient(90deg,transparent,#ffffff0b,transparent);content:"";transform:translateX(-100%);animation:shimmer 1.4s infinite}@keyframes shimmer{to{transform:translateX(100%)}}
+    @media(max-width:1180px){.topbar{align-items:flex-start;flex-direction:column}.toolbar{width:100%;justify-content:space-between}.lower-grid{grid-template-columns:minmax(0,1fr) minmax(300px,.85fr)}}
+    @media(max-width:1024px){:root{--sidebar-width:204px}.sidebar{padding-inline:10px}.topbar{padding-inline:20px}.content{padding:20px}.kpi-grid{gap:10px}.kpi-card{padding:15px}.kpi-value{font-size:25px}.lower-grid{grid-template-columns:minmax(0,1fr)}.system-stack{grid-template-columns:repeat(3,minmax(0,1fr))}.system-item{padding:0 10px 0 0;border:0;border-right:1px solid var(--border)}.system-item:last-child{padding-right:0;border:0}}
+    @media(max-width:760px){.sidebar{position:static;width:auto;min-height:auto;padding:12px 14px;border-right:0;border-bottom:1px solid var(--border)}.brand{padding:0 0 12px}.nav-label,.sidebar-spacer,.connection-card{display:none}.nav-list{display:flex;overflow-x:auto;gap:4px}.nav-item{min-width:max-content;min-height:36px;padding:0 9px}.nav-item:not([aria-current=page]) .count{display:none}.main{margin-left:0}.topbar{position:static;gap:14px;padding:18px 16px}.toolbar{display:grid;grid-template-columns:1fr auto;gap:8px}.sample-badge{grid-column:1/-1;justify-self:start}.segmented{grid-column:1/-1;justify-self:start}.search{width:100%}.content{gap:14px;padding:14px 14px 24px}.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi-card{min-height:116px;padding:14px}.card-header{align-items:flex-start;flex-direction:column}.header-actions{flex-wrap:wrap}.system-stack{grid-template-columns:minmax(0,1fr)}.system-item{padding:0 0 12px;border:0;border-bottom:1px solid var(--border)}.system-item:last-child{padding-bottom:0;border:0}}
+    @media(max-width:420px){.kpi-value{font-size:22px}.kpi-foot{font-size:10px}.type-row{grid-template-columns:minmax(90px,1.1fr) minmax(32px,1fr) 36px 34px;gap:6px}.chart-wrap{padding-inline:10px}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">e</span><span>Engram Manager</span></div>
+      <div class="nav-label">Workspace</div>
+      <nav class="nav-list" aria-label="Workspace">
+        <a class="nav-item" href="#overview" aria-current="page"><span class="nav-copy"><span class="nav-glyph" aria-hidden="true">◫</span>Overview</span></a>
+        <a class="nav-item" href="#memories"><span class="nav-copy"><span class="nav-glyph" aria-hidden="true">▤</span>Memories</span><span class="count">1417</span></a>
+        <a class="nav-item" href="#relations"><span class="nav-copy"><span class="nav-glyph" aria-hidden="true">⤳</span>Relations</span><span class="count">1659</span></a>
+        <a class="nav-item" href="#sessions"><span class="nav-copy"><span class="nav-glyph" aria-hidden="true">◷</span>Sessions</span><span class="count">580</span></a>
+        <a class="nav-item" href="#review"><span class="nav-copy"><span class="nav-glyph" aria-hidden="true">✓</span>Review</span><span class="count review">145</span></a>
+        <a class="nav-item" href="#system"><span class="nav-copy"><span class="nav-glyph" aria-hidden="true">⌁</span>System &amp; Health</span></a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <section class="connection-card" aria-label="Connection status"><div class="connection-title"><span class="status-dot" aria-hidden="true"></span>engram serve connected</div><div class="connection-meta"><span>Database</span><strong>23.9 MiB</strong></div><div class="connection-meta"><span>WAL <span class="wal-warning">· near DB</span></span><strong>22.1 MiB</strong></div></section>
+    </aside>
+    <main class="main" id="overview">
+      <header class="topbar">
+        <div class="page-heading"><h1>Overview</h1><p>Persistent memory at a glance</p></div>
+        <div class="toolbar">
+          <span class="sample-badge" id="sample-badge" hidden><span aria-hidden="true">◉</span>Sample data</span>
+          <div class="segmented" role="group" aria-label="Time range"><button class="segment" type="button" data-range="24h" aria-pressed="false">24h</button><button class="segment" type="button" data-range="7d" aria-pressed="true">7d</button><button class="segment" type="button" data-range="30d" aria-pressed="false">30d</button></div>
+          <label class="search"><span class="search-icon" aria-hidden="true">⌕</span><span class="visually-hidden">Search memories</span><input id="search" type="search" placeholder="Search memories…"><kbd aria-hidden="true">/</kbd></label>
+          <button class="button" id="refresh" type="button"><span aria-hidden="true">↻</span>Refresh</button>
+        </div>
+      </header>
+      <div class="content">
+        <section class="kpi-grid" aria-label="Memory metrics">
+          <article class="card kpi-card"><div class="kpi-top"><span class="kpi-label">Memories</span></div><div class="kpi-value" id="total-memories">1,417</div><div class="kpi-foot">Across 23 types · current total</div></article>
+          <article class="card kpi-card"><div class="kpi-top"><span class="kpi-label">New in range</span></div><div class="kpi-value" id="new-count">289</div><div class="kpi-foot"><span class="delta neutral" id="new-delta">— Comparison unavailable</span></div></article>
+          <article class="card kpi-card"><div class="kpi-top"><a class="kpi-label-link" href="#review"><span class="kpi-label">Pending review</span><span aria-hidden="true">↗</span></a><span class="pending-marker"><span aria-hidden="true">!</span>Action needed</span></div><div class="kpi-value" id="pending-count">145</div><div class="kpi-foot">Items awaiting review</div></article>
+          <article class="card kpi-card"><div class="kpi-top"><span class="kpi-label">Relations</span></div><div class="kpi-value" id="relation-count">1,659</div><div class="kpi-foot">Current total</div></article>
+        </section>
+        <article class="card activity-card" id="activity-card">
+          <header class="card-header"><div><h2 class="card-title">Daily activity</h2><p class="card-subtitle" id="activity-window">Last 7 days</p></div><div class="header-actions"><span class="count" id="activity-range">7d</span></div></header>
+          <div class="chart-wrap" id="chart-wrap">
+            <div class="chart-legend"><span class="legend-item"><span class="legend-swatch" aria-hidden="true"></span>Daily memories</span><span class="legend-item"><span class="legend-swatch peak" aria-hidden="true"></span>Peak</span><span class="legend-item"><span class="legend-line" aria-hidden="true"></span><span id="average-legend">7-day average</span></span></div>
+            <svg class="activity-chart" id="activity-chart" viewBox="0 0 960 190" role="group" aria-label="Daily memory activity chart"></svg>
+            <div class="chart-selected" id="chart-selected" aria-live="polite">Focus or select a bar to inspect its sample details.</div>
+            <div class="chart-note"><span id="chart-average"><strong>41.3</strong> avg / day</span><span id="chart-context">Weekend values are near zero.</span></div>
+          </div>
+          <div class="inline-state" id="chart-empty" hidden><div><strong>No activity data</strong>There are no bars in this selected range.</div></div>
+        </article>
+        <div class="lower-grid">
+          <article class="card" id="type-card">
+            <header class="card-header"><div><h2 class="card-title">Memory types</h2><p class="card-subtitle" id="type-window">Counts in the last 7 days</p></div><div class="header-actions"><label class="toggle-label"><input id="exclude-sessions" type="checkbox">Exclude session_summary</label><select class="small-select" id="type-period" aria-label="Memory type period"><option value="range">In range</option><option value="all">All time</option></select></div></header>
+            <div class="type-list" id="type-list" aria-live="polite"></div>
+          </article>
+          <article class="card" id="system">
+            <header class="card-header"><div><h2 class="card-title">System health</h2><p class="card-subtitle">Vector index</p></div></header>
+            <div class="system-stack">
+              <div class="system-item"><span class="system-label">Vector coverage</span><span class="health-pill" id="vector-health"><span aria-hidden="true">✓</span><span id="vector-status">384 dim · 100% covered</span></span><div class="progress-track" id="vector-progress-track" hidden><div class="progress-fill" id="vector-progress"></div></div></div>
+              <div class="system-item"><span class="system-label">Indexed memories</span><span class="system-value" id="vector-total">1,417 / 1,417</span></div>
+              <div class="system-item"><span class="system-label">Embedding model</span><span class="model-name" id="embedding-model">paraphrase-multilingual-MiniLM-L12-v2</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="tooltip" id="chart-tooltip" role="status" aria-live="polite"></div>
+  <script>
+    const DATA = {
+      source: "sample",
+      daily: [
+        {date:"2026-09-22",count:23,topType:"session_summary"},{date:"2026-09-23",count:29,topType:"discovery"},{date:"2026-09-24",count:33,topType:"config"},{date:"2026-09-25",count:38,topType:"bugfix"},{date:"2026-09-26",count:1,topType:"session_summary"},{date:"2026-09-27",count:0,topType:"discovery"},
+        {date:"2026-09-28",count:40,topType:"session_summary"},{date:"2026-09-29",count:46,topType:"discovery"},{date:"2026-09-30",count:43,topType:"config"},{date:"2026-10-01",count:42,topType:"bugfix"},{date:"2026-10-02",count:45,topType:"decision"},{date:"2026-10-03",count:1,topType:"session_summary"},{date:"2026-10-04",count:0,topType:"pattern"},
+        {date:"2026-10-05",count:110,topType:"session_summary"},{date:"2026-10-06",count:41,topType:"discovery"},{date:"2026-10-07",count:45,topType:"config"},{date:"2026-10-08",count:55,topType:"bugfix"},{date:"2026-10-09",count:48,topType:"decision"},{date:"2026-10-10",count:1,topType:"session_summary"},{date:"2026-10-11",count:0,topType:"discovery"},
+        {date:"2026-10-12",count:45,topType:"session_summary"},{date:"2026-10-13",count:52,topType:"config"},{date:"2026-10-14",count:53,topType:"bugfix"},{date:"2026-10-15",count:55,topType:"session_summary"},{date:"2026-10-16",count:54,topType:"discovery"},{date:"2026-10-17",count:1,topType:"session_summary"},{date:"2026-10-18",count:0,topType:"decision"},{date:"2026-10-19",count:55,topType:"config"},{date:"2026-10-20",count:54,topType:"bugfix"},{date:"2026-10-21",count:70,topType:"session_summary"}
+      ],
+      hourly: [
+        {hour:"00:00",count:0,topType:"session_summary"},{hour:"01:00",count:0,topType:"session_summary"},{hour:"02:00",count:0,topType:"discovery"},{hour:"03:00",count:0,topType:"config"},{hour:"04:00",count:0,topType:"session_summary"},{hour:"05:00",count:0,topType:"bugfix"},{hour:"06:00",count:0,topType:"session_summary"},{hour:"07:00",count:0,topType:"discovery"},{hour:"08:00",count:2,topType:"config"},{hour:"09:00",count:5,topType:"session_summary"},{hour:"10:00",count:6,topType:"discovery"},{hour:"11:00",count:8,topType:"config"},{hour:"12:00",count:9,topType:"session_summary"},{hour:"13:00",count:8,topType:"bugfix"},{hour:"14:00",count:7,topType:"decision"},{hour:"15:00",count:7,topType:"session_summary"},{hour:"16:00",count:6,topType:"discovery"},{hour:"17:00",count:5,topType:"config"},{hour:"18:00",count:4,topType:"session_summary"},{hour:"19:00",count:3,topType:"bugfix"},{hour:"20:00",count:0,topType:"decision"},{hour:"21:00",count:0,topType:"session_summary"},{hour:"22:00",count:0,topType:"discovery"},{hour:"23:00",count:0,topType:"pattern"}
+      ],
+      typeCounts: {
+        all: {session_summary:353,discovery:270,config:254,bugfix:226,decision:107,architecture:103,pattern:44,preference:17,manual:16,"14 smaller types":27},
+        "24h": {session_summary:30,discovery:10,decision:8,config:8,bugfix:8,pattern:2,feature:1,manual:1,architecture:1,change:1},
+        "7d": {session_summary:129,discovery:39,decision:36,config:34,bugfix:31,pattern:6,feature:4,manual:3,architecture:2,change:1,"4 other types":4},
+        "30d": {session_summary:420,discovery:180,config:150,bugfix:140,decision:80,architecture:50,pattern:30,feature:12,manual:6,preference:4,change:3,"other types":8}
+      },
+      totals: {
+        memories:1417,relations:1659,sessions:580,pendingReview:145,memoryTypes:23,
+        databaseMiB:23.9,walMiB:22.1,vectorCovered:1417,vectorTotal:1417,dimensions:384,
+        embeddingModel:"paraphrase-multilingual-MiniLM-L12-v2",
+        previousPeriod:{"24h":76,"7d":270,"30d":1080}
+      }
+    };
+    const TYPE_TOKEN = {session_summary:"--type-session-summary",discovery:"--type-discovery",decision:"--type-decision",config:"--type-config",bugfix:"--type-bugfix",pattern:"--type-pattern",architecture:"--type-architecture",feature:"--type-feature",preference:"--type-other",manual:"--type-other",change:"--type-other",other:"--type-other"};
+    const fmt = new Intl.NumberFormat("en-US");
+    const RANGE_LABEL = {"24h":"Last 24 hours","7d":"Last 7 days","30d":"Last 30 days"};
+    let selectedRange = "7d";
+    let typePeriod = "range";
+    let focusedDatum = null;
+    const chart = document.getElementById("activity-chart");
+    const tooltip = document.getElementById("chart-tooltip");
+    const typeList = document.getElementById("type-list");
+
+    function total(items){return items.reduce((sum,item)=>sum+item.count,0)}
+    function dateLabel(iso){return new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US",{month:"short",day:"2-digit",timeZone:"UTC"})}
+    function topTypeFor(counts){return Object.entries(counts).filter(([name])=>!name.includes("other")&&!name.includes("smaller")).sort((a,b)=>b[1]-a[1])[0]?.[0]||"other"}
+    function datasetForRange(){if(selectedRange==="24h")return DATA.hourly;if(selectedRange==="7d")return DATA.daily.slice(-7);return DATA.daily}
+    function countForRange(){return total(datasetForRange())}
+    function deltaForRange(){const current=countForRange();const previous=DATA.totals.previousPeriod[selectedRange];if(current===previous)return{className:"neutral",symbol:"—",text:"No change",percent:0};const change=(current-previous)/previous*100;return{className:change>0?"up":"down",symbol:change>0?"↑":"↓",text:`${Math.abs(change).toFixed(1)}% vs previous period`,percent:change}}
+    function renderKpis(){document.getElementById("total-memories").textContent=fmt.format(DATA.totals.memories);document.getElementById("relation-count").textContent=fmt.format(DATA.totals.relations);document.getElementById("pending-count").textContent=fmt.format(DATA.totals.pendingReview);document.getElementById("new-count").textContent=fmt.format(countForRange());const delta=deltaForRange();const node=document.getElementById("new-delta");node.className=`delta ${delta.className}`;node.textContent=`${delta.symbol} ${delta.text}`}
+    function rowsForCurrentTypeRange(){return typePeriod==="all"?DATA.typeCounts.all:DATA.typeCounts[selectedRange]}
+    function renderTypes(){const rows=rowsForCurrentTypeRange();const entries=Object.entries(rows).filter(([name])=>!(document.getElementById("exclude-sessions").checked&&name==="session_summary")).sort((a,b)=>b[1]-a[1]);const heading=document.getElementById("type-window");heading.textContent=typePeriod==="all"?"All-time counts":"Counts in the selected range";if(!entries.length){typeList.innerHTML='<div class="inline-state type-empty"><div><strong>No type counts</strong>No records are available for this range.</div></div>';return}const max=Math.max(...entries.map(([,count])=>count));const totalCount=Object.values(rows).reduce((sum,value)=>sum+value,0);typeList.innerHTML=entries.map(([name,count])=>{const token=TYPE_TOKEN[name]||TYPE_TOKEN.other;const share=count/totalCount*100;const percent=share>0&&share<1?"<1%":`${Math.round(share)}%`;return `<div class="type-row"><span class="type-chip" style="--type-color:var(${token})"><span class="type-dot" aria-hidden="true"></span>${name}</span><span class="bar-track" aria-hidden="true"><span class="bar-fill" style="--type-color:var(${token});--bar-width:${count/max*100}%"></span></span><span class="type-count">${fmt.format(count)}</span><span class="type-share">${percent}</span></div>`}).join("")}
+    function niceMax(value){return Math.max(1,Math.ceil(value/10)*10)}
+    function chartLabel(datum){return selectedRange==="24h"?datum.hour:dateLabel(datum.date)}
+    function showTooltip(node,datum,event){
+      focusedDatum=datum;
+      const label=chartLabel(datum);
+      tooltip.innerHTML=`<strong>${label} · ${fmt.format(datum.count)}</strong><span>Top type: ${datum.topType}</span>`;
+      tooltip.classList.add("visible");
+      const box=node.getBoundingClientRect();
+      const pointerX=event&&Number.isFinite(event.clientX)&&event.clientX?event.clientX:box.left+box.width/2;
+      const pointerY=event&&Number.isFinite(event.clientY)&&event.clientY?event.clientY:box.top;
+      const tipWidth=tooltip.offsetWidth,tipHeight=tooltip.offsetHeight;
+      tooltip.style.left=`${Math.max(8,Math.min(pointerX+12,window.innerWidth-tipWidth-8))}px`;
+      tooltip.style.top=`${Math.max(8,Math.min(pointerY-tipHeight-10,window.innerHeight-tipHeight-8))}px`;
+      document.getElementById("chart-selected").textContent=`${label} · ${fmt.format(datum.count)} memories · Top type: ${datum.topType}`;
+    }
+    function hideTooltip(){tooltip.classList.remove("visible")}
+    function makeTicks(data){
+      if(selectedRange==="24h")return [0,6,12,18,23].map(index=>({index,label:data[index].hour.slice(0,2)}));
+      const ticks=[];
+      for(let index=0;index<data.length;index+=5)ticks.push({index,label:dateLabel(data[index].date)});
+      if(selectedRange==="30d"){
+        const peakIndex=data.findIndex(item=>item.date==="2026-10-05");
+        if(peakIndex>=0&&!ticks.some(tick=>tick.index===peakIndex))ticks.push({index:peakIndex,label:dateLabel(data[peakIndex].date)});
+      }
+      const last=data.length-1;
+      if(!ticks.some(tick=>tick.index===last))ticks.push({index:last,label:chartLabel(data[last])});
+      return ticks.sort((a,b)=>a.index-b.index);
+    }
+    function renderChart(){
+      const data=datasetForRange();
+      document.getElementById("activity-window").textContent=RANGE_LABEL[selectedRange];
+      document.getElementById("activity-range").textContent=selectedRange;
+      document.getElementById("chart-wrap").hidden=data.length===0;
+      document.getElementById("chart-empty").hidden=data.length>0;
+      if(!data.length)return;
+      const width=960,height=190,left=46,right=12,top=14,bottom=27;
+      const plotW=width-left-right,plotH=height-top-bottom;
+      const maxValue=Math.max(...data.map(item=>item.count));
+      const maxY=niceMax(maxValue);
+      const levelStep=maxY>60?20:Math.max(2,Math.ceil(maxY/4/2)*2);
+      const levels=[];
+      for(let level=0;level<=maxY;level+=levelStep)levels.push(level);
+      if(levels.at(-1)!==maxY)levels.push(maxY);
+      const y=value=>top+plotH-value/maxY*plotH;
+      const grid=levels.map(value=>`<line class="chart-grid" x1="${left}" x2="${width-right}" y1="${y(value)}" y2="${y(value)}"/><text class="chart-axis" x="${left-9}" y="${y(value)+3}" text-anchor="end">${value}</text>`).join("");
+      const average=total(data)/data.length,avgY=y(average);
+      const avgLine=`<line class="chart-average" x1="${left}" x2="${width-right}" y1="${avgY}" y2="${avgY}"/>`;
+      const slotWidth=plotW/data.length;
+      const firstValue=selectedRange==="24h"?0:Date.parse(`${data[0].date}T12:00:00Z`);
+      const lastDatum=data.at(-1);
+      const lastValue=selectedRange==="24h"?23:Date.parse(`${lastDatum.date}T12:00:00Z`);
+      const xFor=(datum,index)=>{
+        const value=selectedRange==="24h"?index:Date.parse(`${datum.date}T12:00:00Z`);
+        const ratio=lastValue===firstValue?0:(value-firstValue)/(lastValue-firstValue);
+        return left+slotWidth/2+ratio*(plotW-slotWidth);
+      };
+      const barWidth=Math.min(selectedRange==="30d"?18:52,Math.max(5,slotWidth*.66));
+      const bars=data.map((datum,index)=>{
+        const center=xFor(datum,index),barY=y(datum.count),isPeak=datum.count===maxValue&&maxValue>0;
+        return `<rect class="chart-bar${isPeak?" peak":""}" x="${center-barWidth/2}" y="${barY}" width="${barWidth}" height="${Math.max(1,top+plotH-barY)}" rx="3" tabindex="0" role="button" data-index="${index}" aria-label="${chartLabel(datum)}, ${datum.count} memories, top type ${datum.topType}"/>`;
+      }).join("");
+      const ticks=makeTicks(data).map(tick=>{
+        const x=xFor(data[tick.index],tick.index);
+        return `<line class="chart-grid" x1="${x}" x2="${x}" y1="${top+plotH}" y2="${top+plotH+4}"/><text class="chart-axis" x="${x}" y="${height-6}" text-anchor="${tick.index===0?"start":tick.index===data.length-1?"end":"middle"}">${tick.label}</text>`;
+      }).join("");
+      chart.innerHTML=`<title>Memory activity · ${RANGE_LABEL[selectedRange]}</title><desc>${data.length} sample bars. Average ${average.toFixed(1)}. Hover or focus a bar for its date, count, and top type.</desc>${grid}${bars}${avgLine}${ticks}`;
+      chart.querySelectorAll(".chart-bar").forEach(node=>{
+        const datum=data[Number(node.dataset.index)];
+        node.addEventListener("pointerenter",event=>showTooltip(node,datum,event));
+        node.addEventListener("pointermove",event=>showTooltip(node,datum,event));
+        node.addEventListener("pointerleave",hideTooltip);
+        node.addEventListener("focus",event=>showTooltip(node,datum,event));
+        node.addEventListener("blur",hideTooltip);
+        node.addEventListener("click",event=>showTooltip(node,datum,event));
+        node.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();showTooltip(node,datum,event)}});
+      });
+      document.getElementById("average-legend").textContent=`${selectedRange} average`;
+      document.getElementById("chart-average").innerHTML=`<strong>${average.toFixed(1)}</strong> avg / ${selectedRange==="24h"?"hour":"day"}`;
+      document.getElementById("chart-context").textContent=selectedRange==="30d"?"Weekends are near zero in this sample series.":selectedRange==="7d"?"Last 7 daily bars.":"Last 24 hourly bars.";
+    }
+    function renderSystem(){const totals=DATA.totals;const coverage=totals.vectorTotal?totals.vectorCovered/totals.vectorTotal*100:0;document.getElementById("vector-status").textContent=`${totals.dimensions} dim · ${coverage===100?"100% covered":`${coverage.toFixed(1)}% covered`}`;document.getElementById("vector-total").textContent=`${fmt.format(totals.vectorCovered)} / ${fmt.format(totals.vectorTotal)}`;document.getElementById("embedding-model").textContent=totals.embeddingModel;const incomplete=coverage<100;document.getElementById("vector-progress-track").hidden=!incomplete;document.getElementById("vector-progress").style.width=`${coverage}%`;document.getElementById("vector-health").classList.toggle("warn",incomplete);document.getElementById("vector-health").firstElementChild.textContent=incomplete?"!":"✓"}
+    function renderRange(){document.querySelectorAll("[data-range]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.range===selectedRange)));document.getElementById("sample-badge").hidden=DATA.source!=="sample";renderKpis();renderTypes();renderChart();renderSystem()}
+    document.querySelectorAll("[data-range]").forEach(button=>button.addEventListener("click",()=>{selectedRange=button.dataset.range;typePeriod="range";document.getElementById("type-period").value="range";renderRange()}));document.getElementById("type-period").addEventListener("change",event=>{typePeriod=event.target.value;renderTypes()});document.getElementById("exclude-sessions").addEventListener("change",renderTypes);document.getElementById("refresh").addEventListener("click",event=>{const button=event.currentTarget;button.disabled=true;button.innerHTML='<span aria-hidden="true">↻</span>Refreshing';window.setTimeout(()=>{button.disabled=false;button.innerHTML='<span aria-hidden="true">↻</span>Refresh';renderRange()},450)});document.getElementById("search").addEventListener("keydown",event=>{if(event.key==="Escape")event.currentTarget.value=""});document.addEventListener("keydown",event=>{if(event.key==="/"&&!["INPUT","TEXTAREA"].includes(document.activeElement.tagName)){event.preventDefault();document.getElementById("search").focus()}});
+    console.assert(DATA.daily.length===30&&DATA.daily[0].date==="2026-09-22"&&DATA.daily.at(-1).date==="2026-10-21","Sample daily series must cover Sep 22–Oct 21 with 30 entries");console.assert(total(DATA.daily)===1080,"Sample 30-day sum must be 1,080");console.assert(total(DATA.daily)/DATA.daily.length===36,"Sample 30-day average must be 36.0");const peak=DATA.daily.reduce((best,item)=>item.count>best.count?item:best,DATA.daily[0]);console.assert(peak.count===110&&peak.date==="2026-10-05","Sample peak must be 110 on Oct 05");console.assert(total(DATA.daily.slice(-7))===289,"Sample last 7 days must total 289");console.assert(DATA.daily.filter(item=>[0,6].includes(new Date(`${item.date}T12:00:00Z`).getUTCDay())).every(item=>item.count<=1),"Sample weekend values must be near zero");console.assert(DATA.hourly.length===24&&total(DATA.hourly)===DATA.daily.at(-1).count,"Hourly sample must contain 24 bars and reconcile to the final daily total");for(const [range,rows] of Object.entries(DATA.typeCounts)){const expected=range==="all"?DATA.totals.memories:range==="30d"?total(DATA.daily):range==="7d"?total(DATA.daily.slice(-7)):total(DATA.hourly);console.assert(Object.values(rows).reduce((sum,value)=>sum+value,0)===expected,`Type counts for ${range} must reconcile to its displayed total`)}
+    renderRange();
+  </script>
+</body>
+</html>
