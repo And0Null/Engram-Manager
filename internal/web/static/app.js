@@ -23,6 +23,9 @@
     window: "7d",
     typePeriod: "range",
     excludeSessions: false,
+    memoryTotal: 0,
+    sessionTotal: 0,
+    reviewTotal: 0,
     overview: null,
     health: null,
     memories: [],
@@ -41,6 +44,9 @@
   // dropped. Without it a slow endpoint answers after the operator has moved
   // on and repaints its view under the wrong navigation item.
   let viewEpoch = 0;
+  // The drawer is not a view: a separate counter so opening a memory cannot
+  // cancel a view load, and a slow memory cannot land in a newer drawer.
+  let drawerEpoch = 0;
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -59,6 +65,9 @@
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
   const num = (n) => (n ?? 0).toLocaleString("es-ES");
+  // "100 of 1436" when there is more to page through, just the number when the
+  // page is the whole set.
+  const shownOf = (shown, total) => (total > shown ? `${num(shown)} of ${num(total)}` : num(shown));
   const pct = (n) => `${(n ?? 0).toFixed(1)}%`;
 
   function bytes(n) {
@@ -81,8 +90,11 @@
   }
 
   function fmtDay(iso) {
+    // Daily buckets are UTC calendar days (see store.DailyActivity). Formatting
+    // them in local time labels every bucket with the previous day west of
+    // UTC, which attributes a count to the wrong date.
     const d = parseTs(iso);
-    return d ? d.toLocaleDateString("es-ES", { day: "2-digit", month: "short" }) : iso;
+    return d ? d.toLocaleDateString("es-ES", { day: "2-digit", month: "short", timeZone: "UTC" }) : iso;
   }
 
   function toast(message, kind = "ok") {
@@ -465,7 +477,7 @@
 
       <article class="card activity-card">
         <header class="card-header">
-          <div><h2 class="card-title">Daily activity</h2><p class="card-subtitle" id="activity-window">${esc(windowLabel())}</p></div>
+          <div><h2 class="card-title">Daily activity</h2><p class="card-subtitle" id="activity-window">${esc(windowLabel())} · UTC</p></div>
           <div class="header-actions">
             <div class="seg" role="group" aria-label="Chart range">
               ${["24h", "7d", "30d"].map((w) => `<button type="button" data-window="${w}" aria-pressed="${w === state.window}">${w}</button>`).join("")}
@@ -535,9 +547,9 @@
 
   // ---------------------------------------------------------------- memories
 
-  async function loadMemories() {
+  async function loadMemories(append = false) {
     const epoch = ++viewEpoch;
-    loading("Loading memories…");
+    if (!append) loading("Loading memories…");
     const f = state.filter;
     const q = new URLSearchParams();
     if (f.q) q.set("q", f.q);
@@ -546,20 +558,27 @@
     if (f.pinned) q.set("pinned", "1");
     if (f.deleted) q.set("deleted", "1");
     q.set("limit", f.limit);
-    q.set("offset", f.offset);
+    q.set("offset", append ? state.memories.length : f.offset);
     try {
       const data = await api(`/api/observations?${q}`);
       if (epoch !== viewEpoch) return;
-      state.memories = data.observations || [];
+      const rows = data.observations || [];
+      state.memories = append ? state.memories.concat(rows) : rows;
+      state.memoryTotal = data.total || state.memories.length;
       renderMemories();
     } catch (err) {
       if (epoch !== viewEpoch) return;
-      failed(err, loadMemories);
+      failed(err, () => loadMemories());
     }
   }
 
   function renderMemories() {
     const f = state.filter;
+    const shown = state.memories.length;
+    const total = state.memoryTotal || shown;
+    const more = total > shown
+      ? `<div class="table-foot"><span class="sheet-note">${num(total - shown)} more in the store</span><button class="btn" type="button" data-more>Load more</button></div>`
+      : "";
     const rows = state.memories.map((o) => `
       <tr data-clickable="true" data-open="${o.ID}">
         <td class="mono" style="color:var(--fg-mute)">${o.ID}</td>
@@ -575,7 +594,7 @@
         <div class="sheet-head">
           <div>
             <h2 class="card-title">Memories</h2>
-            <p class="card-subtitle">${num(state.memories.length)} shown${f.q ? ` for “${esc(f.q)}”` : ""}${f.project ? ` · project ${esc(f.project)}` : ""}${f.type ? ` · ${esc(f.type)}` : ""}</p>
+            <p class="card-subtitle">${shownOf(shown, total)} shown${f.q ? ` for “${esc(f.q)}”` : ""}${f.project ? ` · project ${esc(f.project)}` : ""}${f.type ? ` · ${esc(f.type)}` : ""}</p>
           </div>
           <div class="sheet-filters">
             <input class="filter" type="text" placeholder="Filter by project…" value="${esc(f.project)}"
@@ -596,7 +615,7 @@
             <th style="width:44px" title="Has semantic vector">Vec</th>
           </tr></thead>
           <tbody>${rows}</tbody>
-        </table>` : `<div class="state">
+        </table>${more}` : `<div class="state">
           <h3>Nothing matches</h3>
           <p>No memory matches these filters. Loosen them, or press <code>/</code> to search the full text index.</p>
         </div>`}
@@ -604,6 +623,7 @@
 
     $$("[data-open]", content).forEach((tr) =>
       tr.addEventListener("click", () => openMemory(tr.dataset.open)));
+    $("[data-more]", content)?.addEventListener("click", () => loadMemories(true));
 
     $$("[data-filter]", content).forEach((el) => {
       const apply = () => {
@@ -703,21 +723,29 @@
 
   // ---------------------------------------------------------------- sessions
 
-  async function loadSessions() {
+  async function loadSessions(append = false) {
     const epoch = ++viewEpoch;
-    loading("Loading sessions…");
+    if (!append) loading("Loading sessions…");
+    const offset = append ? state.sessions.length : 0;
     try {
-      const data = await api("/api/sessions?limit=120");
+      const data = await api(`/api/sessions?limit=120&offset=${offset}`);
       if (epoch !== viewEpoch) return;
-      state.sessions = data.sessions || [];
+      const rows = data.sessions || [];
+      state.sessions = append ? state.sessions.concat(rows) : rows;
+      state.sessionTotal = data.total || state.sessions.length;
       renderSessions();
     } catch (err) {
       if (epoch !== viewEpoch) return;
-      failed(err, loadSessions);
+      failed(err, () => loadSessions());
     }
   }
 
   function renderSessions() {
+    const shown = state.sessions.length;
+    const total = state.sessionTotal || shown;
+    const more = total > shown
+      ? `<div class="table-foot"><span class="sheet-note">${num(total - shown)} more sessions</span><button class="btn" type="button" data-more>Load more</button></div>`
+      : "";
     const rows = state.sessions.map((s) => `
       <tr data-clickable="true" data-timeline="${esc(s.ID)}">
         <td class="mono strong">${esc(s.ID)}</td>
@@ -733,7 +761,7 @@
         <div class="sheet-head">
           <div>
             <h2 class="card-title">Sessions</h2>
-            <p class="card-subtitle">${num(state.sessions.length)} shown · select one to read its timeline</p>
+            <p class="card-subtitle">${shownOf(shown, total)} shown · select one to read its timeline</p>
           </div>
         </div>
         ${rows ? `<table class="table">
@@ -742,11 +770,12 @@
             <th style="width:56px;text-align:right">Obs</th><th style="width:80px">State</th>
             <th style="width:132px">Started</th>
           </tr></thead><tbody>${rows}</tbody>
-        </table>` : `<div class="state"><h3>No sessions</h3><p>This store has no recorded sessions yet.</p></div>`}
+        </table>${more}` : `<div class="state"><h3>No sessions</h3><p>This store has no recorded sessions yet.</p></div>`}
       </div>`;
 
     $$("[data-timeline]", content).forEach((tr) =>
       tr.addEventListener("click", () => openTimeline(tr.dataset.timeline)));
+    $("[data-more]", content)?.addEventListener("click", () => loadSessions(true));
   }
 
   async function openTimeline(id) {
@@ -819,6 +848,7 @@
       const data = await api("/api/review-queue");
       if (epoch !== viewEpoch) return;
       state.review = data.queue || [];
+      state.reviewTotal = data.total || 0;
       renderReview();
     } catch (err) {
       if (epoch !== viewEpoch) return;
@@ -841,7 +871,7 @@
         <div class="sheet-head">
           <div>
             <h2 class="card-title">Scheduled for review</h2>
-            <p class="card-subtitle">${num(state.review.length)} memories carry a review_after date</p>
+            <p class="card-subtitle">${shownOf(state.review.length, state.reviewTotal || state.review.length)} memories carry a review_after date</p>
           </div>
         </div>
         ${rows ? `<table class="table">
@@ -954,8 +984,10 @@
   // ---------------------------------------------------------------- drawer
 
   async function openMemory(ref) {
+    const epoch = ++drawerEpoch;
     try {
       const data = await api(`/api/observations/${encodeURIComponent(ref)}`);
+      if (epoch !== drawerEpoch) return;
       state.memory = data.observation;
       state.memoryRelations = data.relations || [];
       state.editing = false;

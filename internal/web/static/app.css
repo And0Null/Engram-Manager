@@ -485,6 +485,10 @@ input.filter::placeholder { color: var(--text-muted); }
 .table tbody tr:last-child td { border-bottom: none; }
 .table tbody tr[data-clickable="true"] { cursor: pointer; }
 .table tbody tr[data-clickable="true"]:hover td { background: var(--elevated); color: var(--text); }
+.table-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 18px; border-top: 1px solid var(--border);
+}
 .table td.strong { color: var(--text); font-weight: 500; }
 .table td.truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .table td.truncate-sm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
