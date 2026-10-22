@@ -210,6 +210,23 @@ type DailySeries struct {
 	ActiveDays int          `json:"active_days"`
 }
 
+// HourlyPoint is one clock-hour bucket of observation creations. Hour is
+// "YYYY-MM-DD HH:00" in UTC.
+type HourlyPoint struct {
+	Hour  string `json:"hour"`
+	Count int    `json:"count"`
+}
+
+// HourlySeries is the 24h counterpart of DailySeries: gap-free, oldest first,
+// with the summary the chart would otherwise compute by hand.
+type HourlySeries struct {
+	Hours      []HourlyPoint `json:"hours"`
+	Total      int           `json:"total"`
+	AvgPerHour float64       `json:"avg_per_hour"`
+	PeakCount  int           `json:"peak_count"`
+	PeakHour   string        `json:"peak_hour"`
+}
+
 // TypeCount is one memory type and how many live observations carry it.
 type TypeCount struct {
 	Type  string  `json:"type"`
