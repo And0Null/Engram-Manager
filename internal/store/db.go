@@ -47,10 +47,13 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open engram database: %w", err)
 	}
-	// One connection keeps reads consistent and avoids contending with
-	// Engram's own writers for the WAL.
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	// Read-only SQLite in WAL mode tolerates concurrent readers, and a single
+	// connection serializes every request behind the slowest query: a relation
+	// listing that took 11s used to freeze every other view. Engram does the
+	// writing, and the pragmas travel in the DSN, so a small read pool costs
+	// nothing and removes that stall.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(time.Hour)
 
 	if err := db.Ping(); err != nil {
