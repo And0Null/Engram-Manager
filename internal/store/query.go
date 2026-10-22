@@ -206,6 +206,12 @@ func (s *Store) Count(f Filter) (int, error) {
 		where = append(where, "o.scope = ?")
 		args = append(args, f2.Scope)
 	}
+	// The list honours this filter, so the total must too, or a paged view
+	// would report a count for a different query than the rows it shows.
+	if f2.SessionID != "" {
+		where = append(where, "o.session_id = ?")
+		args = append(args, f2.SessionID)
+	}
 	if f2.TopicKey != "" {
 		where = append(where, "o.topic_key = ?")
 		args = append(args, f2.TopicKey)

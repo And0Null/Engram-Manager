@@ -111,6 +111,18 @@ func (s *Store) Relations(f RelationFilter) ([]MemoryRelation, error) {
 	return out, rows.Err()
 }
 
+// ReviewPendingCount is the one definition of "awaiting review". The nav
+// counter and the Review view both read it, so they cannot quote different
+// totals for the same predicate.
+func (s *Store) ReviewPendingCount() (int, error) {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM observations
+		WHERE deleted_at IS NULL AND review_after IS NOT NULL AND review_after <> ''`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count pending review: %w", err)
+	}
+	return n, nil
+}
+
 // RelationsSummary aggregates counts across relations and judgment statuses.
 func (s *Store) RelationsSummary() (RelationsSummary, error) {
 	sum := RelationsSummary{

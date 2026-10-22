@@ -131,12 +131,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	emb, _ := s.store.EmbeddingStats()
 	// Nav counters live here so the sidebar never shows a number that belongs
-	// to a different measure.
+	// to a different measure. Both counters come from the store's own
+	// definitions, never from an inline query that could drift from them.
 	relSum, _ := s.store.RelationsSummary()
-	var reviewTotal int
-	s.store.DB().QueryRow(`SELECT COUNT(*) FROM observations
-		WHERE deleted_at IS NULL AND review_after IS NOT NULL AND review_after <> ''`).
-		Scan(&reviewTotal)
+	reviewTotal, _ := s.store.ReviewPendingCount()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"health":         h,
@@ -252,10 +250,18 @@ func (s *Server) handleListObservations(w http.ResponseWriter, r *http.Request) 
 	if list == nil {
 		list = []store.Observation{}
 	}
+	// The total is the same filter without the page window: a view that says
+	// "100 shown" has to be able to say of how many.
+	total, err := s.store.Count(f)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"observations": list,
 		"count":        len(list),
+		"total":        total,
 		"offset":       f.Offset,
 		"limit":        f.Limit,
 	})
@@ -449,8 +455,12 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	if l, err := strconv.Atoi(q.Get("limit")); err == nil && l > 0 {
 		limit = l
 	}
+	offset := 0
+	if off, err := strconv.Atoi(q.Get("offset")); err == nil && off > 0 {
+		offset = off
+	}
 
-	sessions, err := s.store.Sessions(project, includeEnded, limit)
+	sessions, err := s.store.SessionsPage(project, includeEnded, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -458,10 +468,17 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	if sessions == nil {
 		sessions = []store.Session{}
 	}
+	total, err := s.store.SessionsCount(project, includeEnded)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sessions": sessions,
 		"count":    len(sessions),
+		"total":    total,
+		"offset":   offset,
 	})
 }
 
@@ -523,9 +540,15 @@ func (s *Server) handleReviewQueue(w http.ResponseWriter, r *http.Request) {
 	if queue == nil {
 		queue = []store.Observation{}
 	}
+	total, err := s.store.ReviewPendingCount()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"queue": queue,
 		"count": len(queue),
+		"total": total,
 	})
 }
