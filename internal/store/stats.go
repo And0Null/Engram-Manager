@@ -131,8 +131,17 @@ func (s *Store) sessionDirectories() (map[string][]string, error) {
 // Sessions returns sessions newest first, optionally filtered by project.
 // Active sessions come first inside each group so a stale pair is visible.
 func (s *Store) Sessions(project string, includeEnded bool, limit int) ([]Session, error) {
+	return s.SessionsPage(project, includeEnded, limit, 0)
+}
+
+// SessionsPage is Sessions with an offset, so a view can page through the list
+// instead of guessing a limit large enough to hold it.
+func (s *Store) SessionsPage(project string, includeEnded bool, limit, offset int) ([]Session, error) {
 	if limit <= 0 {
 		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	q := `
 		SELECT s.id, s.project, COALESCE(s.directory, ''), s.started_at, COALESCE(s.ended_at, ''),
@@ -149,8 +158,8 @@ func (s *Store) Sessions(project string, includeEnded bool, limit int) ([]Sessio
 	if !includeEnded {
 		q += " AND s.ended_at IS NULL"
 	}
-	q += " ORDER BY s.ended_at IS NOT NULL, s.started_at DESC LIMIT ?"
-	args = append(args, limit)
+	q += " ORDER BY s.ended_at IS NOT NULL, s.started_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
@@ -168,6 +177,24 @@ func (s *Store) Sessions(project string, includeEnded bool, limit int) ([]Sessio
 		out = append(out, x)
 	}
 	return out, rows.Err()
+}
+
+// SessionsCount counts what SessionsPage pages through, with the same filters.
+func (s *Store) SessionsCount(project string, includeEnded bool) (int, error) {
+	q := "SELECT COUNT(*) FROM sessions s WHERE 1=1"
+	var args []any
+	if project != "" {
+		q += " AND s.project = ?"
+		args = append(args, project)
+	}
+	if !includeEnded {
+		q += " AND s.ended_at IS NULL"
+	}
+	var n int
+	if err := s.db.QueryRow(q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count sessions: %w", err)
+	}
+	return n, nil
 }
 
 // Facet returns the distinct values of a column with live counts, sorted by

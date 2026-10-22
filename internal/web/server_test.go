@@ -223,9 +223,14 @@ func TestServerEndpoints(t *testing.T) {
 	var obsResp struct {
 		Observations []store.Observation `json:"observations"`
 		Count        int                 `json:"count"`
+		Total        int                 `json:"total"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&obsResp); err != nil {
 		t.Fatalf("decode observations: %v", err)
+	}
+	// The page and the total it is quoted against must describe one query.
+	if obsResp.Total != obsResp.Count {
+		t.Errorf("total = %d, count = %d, want equal on a full page", obsResp.Total, obsResp.Count)
 	}
 	if obsResp.Count != 1 || obsResp.Observations[0].Title != "Use SQLite" {
 		t.Errorf("unexpected observations payload: %+v", obsResp)
@@ -276,6 +281,17 @@ func TestServerEndpoints(t *testing.T) {
 	}
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("review queue status = %d, want 200", res.StatusCode)
+	}
+	var reviewResp struct {
+		Queue []store.Observation `json:"queue"`
+		Count int                 `json:"count"`
+		Total int                 `json:"total"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&reviewResp); err != nil {
+		t.Fatalf("decode review queue: %v", err)
+	}
+	if reviewResp.Total < reviewResp.Count {
+		t.Errorf("review total = %d, count = %d: a page cannot exceed its total", reviewResp.Total, reviewResp.Count)
 	}
 
 	// 9. GET / static index.html
