@@ -35,6 +35,9 @@
     sessions: [],
     timeline: null,
     review: [],
+    radar: { tasks: [], total: 0, filter: { project: "", status: "", priority: "", category: "", q: "" } },
+    radarTask: null,
+    projectsList: [],
     memory: null,
     memoryRelations: [],
     editing: false,
@@ -530,6 +533,14 @@
               <span class="system-value">${num(emb.total_embedded || 0)} / ${num(h.LiveObservations || 0)}</span>
             </div>
             <div class="system-item">
+              <span class="system-label">Agent processes</span>
+              <span class="system-value mono">${(d.terminals && d.terminals.active_count > 0) ? `${d.terminals.active_count} active` : "idle"}</span>
+            </div>
+            <div class="system-item">
+              <span class="system-label">Herdr socket</span>
+              <span class="system-value mono" style="color:${d.terminals?.herdr?.available ? 'var(--healthy)' : 'var(--fg-mute)'}">${d.terminals?.herdr?.available ? "connected" : "absent"}</span>
+            </div>
+            <div class="system-item">
               <span class="system-label">Embedding model</span>
               <span class="model-name">${esc(emb.available && emb.model ? emb.model.split("/").pop() : "not installed")}</span>
             </div>
@@ -795,6 +806,91 @@
     const t = state.timeline;
     const obs = t.observations || [];
     const prompts = t.prompts || [];
+    const ps = t.parsed_summary;
+    const relTasks = t.related_tasks || [];
+
+    const goal = ps?.goal || "";
+    const nextSteps = ps?.next_steps || [];
+    const decisions = ps?.decisions || [];
+    const discoveries = ps?.discoveries || [];
+    const accomplished = ps?.accomplished || [];
+
+    const hasExpediente = goal || nextSteps.length || decisions.length || discoveries.length || accomplished.length;
+
+    const expedienteHtml = hasExpediente ? `
+      <section class="expediente-panel">
+        <div class="expediente-head">
+          <div class="expediente-title">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Expediente de Sesión (Resumen Estructurado)
+          </div>
+          <span class="panel-note">${esc(t.session?.Project || "")} · ${esc(fmtDate(t.session?.StartedAt || ""))}</span>
+        </div>
+
+        ${goal ? `<div class="expediente-goal"><strong>Objetivo:</strong> ${esc(goal)}</div>` : ""}
+
+        ${nextSteps.length ? `
+          <div class="expediente-section">
+            <div class="expediente-sec-title">Próximos Pasos (Accionables)</div>
+            <div class="expediente-list">
+              ${nextSteps.map((step, idx) => `
+                <div class="expediente-item">
+                  <span>${esc(step)}</span>
+                  <button class="btn-sm" data-step-to-radar="${idx}">+ A Radar</button>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        ` : ""}
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:var(--s3)">
+          ${decisions.length ? `
+            <div class="expediente-section">
+              <div class="expediente-sec-title">Decisiones Clave</div>
+              <ul style="padding-left:18px;font-size:12.5px;color:var(--text-secondary);line-height:1.5">
+                ${decisions.map(d => `<li>${esc(d)}</li>`).join("")}
+              </ul>
+            </div>
+          ` : ""}
+          ${discoveries.length ? `
+            <div class="expediente-section">
+              <div class="expediente-sec-title">Descubrimientos / Aprendizajes</div>
+              <ul style="padding-left:18px;font-size:12.5px;color:var(--text-secondary);line-height:1.5">
+                ${discoveries.map(d => `<li>${esc(d)}</li>`).join("")}
+              </ul>
+            </div>
+          ` : ""}
+          ${accomplished.length ? `
+            <div class="expediente-section">
+              <div class="expediente-sec-title">Logros / Shipped</div>
+              <ul style="padding-left:18px;font-size:12.5px;color:var(--text-secondary);line-height:1.5">
+                ${accomplished.map(a => `<li>${esc(a)}</li>`).join("")}
+              </ul>
+            </div>
+          ` : ""}
+        </div>
+      </section>
+    ` : "";
+
+    const relatedTasksHtml = relTasks.length ? `
+      <section class="panel" style="margin-bottom:var(--s4)">
+        <div class="panel-head">
+          <h2 class="panel-title">Tareas de Action Radar Vinculadas (${relTasks.length})</h2>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:var(--s2);padding:var(--s3)">
+          ${relTasks.map(tsk => `
+            <div class="radar-card" style="flex:1;min-width:220px;cursor:pointer" data-open-radar="${esc(tsk.id)}">
+              <div class="radar-card-head">
+                <span class="tag ${tsk.priority === 'HIGH' ? 'tag-conflict' : tsk.priority === 'MEDIUM' ? 'tag-pending' : 'tag-live'}">${esc(tsk.priority)}</span>
+                <span class="chip" style="font-size:10.5px">${esc(tsk.category)}</span>
+                <span class="tag ${tsk.status === 'COMPLETED' ? 'tag-live' : 'tag-pending'}">${esc(tsk.status)}</span>
+              </div>
+              <div class="radar-card-title">${esc(tsk.title)}</div>
+            </div>
+          `).join("")}
+        </div>
+      </section>
+    ` : "";
 
     const entries = obs.map((o) => `
       <div style="display:grid;grid-template-columns:118px 1fr;gap:var(--s4);padding-bottom:var(--s4)">
@@ -812,6 +908,8 @@
       </div>`).join("");
 
     content.innerHTML = `
+      ${expedienteHtml}
+      ${relatedTasksHtml}
       <div class="instrument" style="grid-template-columns:minmax(0,7fr) minmax(0,3fr)">
         <section class="panel">
           <div class="panel-head">
@@ -837,6 +935,413 @@
       </div>`;
 
     $("[data-back]", content).addEventListener("click", loadSessions);
+
+    $$("[data-step-to-radar]", content).forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const idx = Number(btn.dataset.stepToRadar);
+        const stepText = nextSteps[idx];
+        try {
+          await api("/api/radar/tasks", {
+            method: "POST",
+            body: {
+              project: t.session?.Project || "general",
+              title: stepText,
+              category: "FEATURE",
+              priority: "MEDIUM",
+              origin_session_id: t.session_id,
+            },
+          });
+          toast("Tarea creada en Action Radar", "ok");
+          openTimeline(t.session_id);
+        } catch (err) {
+          toast(err.message, "error");
+        }
+      });
+    });
+
+    $$("[data-open-radar]", content).forEach((card) => {
+      card.addEventListener("click", () => {
+        openRadarTaskDrawer(card.dataset.openRadar);
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------- radar
+
+  async function loadRadar() {
+    const epoch = ++viewEpoch;
+    loading("Cargando tareas de Action Radar…");
+    try {
+      const rf = state.radar.filter;
+      const params = new URLSearchParams();
+      if (rf.project) params.set("project", rf.project);
+      if (rf.status) params.set("status", rf.status);
+      if (rf.priority) params.set("priority", rf.priority);
+      if (rf.category) params.set("category", rf.category);
+      if (rf.q) params.set("q", rf.q);
+      params.set("limit", "150");
+
+      const [data, projData] = await Promise.all([
+        api(`/api/radar/tasks?${params.toString()}`),
+        state.projectsList.length ? Promise.resolve(null) : api("/api/projects").catch(() => null),
+      ]);
+
+      if (epoch !== viewEpoch) return;
+      state.radar.tasks = data.tasks || [];
+      state.radar.total = data.total || 0;
+      if (projData?.projects) {
+        state.projectsList = projData.projects;
+      }
+      renderRadar();
+    } catch (err) {
+      if (epoch !== viewEpoch) return;
+      failed(err, loadRadar);
+    }
+  }
+
+  function renderRadar() {
+    const tasks = state.radar.tasks;
+    const rf = state.radar.filter;
+
+    const inProgress = tasks.filter((t) => t.status === "IN_PROGRESS");
+    const pending = tasks.filter((t) => t.status === "PENDING" || t.status === "DEFERRED");
+    const completed = tasks.filter((t) => t.status === "COMPLETED");
+
+    const projects = state.projectsList || state.overview?.projects || [];
+
+    const renderCard = (t) => `
+      <div class="radar-card" data-task-id="${esc(t.id)}">
+        <div class="radar-card-head">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="tag ${t.priority === 'HIGH' ? 'tag-conflict' : t.priority === 'MEDIUM' ? 'tag-pending' : 'tag-live'}">${esc(t.priority)}</span>
+            <span class="chip" style="font-size:10.5px">${esc(t.category)}</span>
+          </div>
+          <span class="mono" style="font-size:10.5px;color:var(--text-muted)">${esc(t.project)}</span>
+        </div>
+        <div class="radar-card-title">${esc(t.title)}</div>
+        ${t.description ? `<div class="radar-card-desc">${esc(t.description)}</div>` : ""}
+        <div class="radar-card-meta">
+          <div>
+            ${t.origin_session_id ? `<button class="link mono" style="font-size:10.5px" data-goto-session="${esc(t.origin_session_id)}">⎇ session</button>` : ""}
+            ${t.notes && t.notes.length ? `<span style="margin-left:6px">${t.notes.length} nota(s)</span>` : ""}
+          </div>
+          <div style="display:flex;gap:4px">
+            ${t.status === "PENDING" ? `<button class="btn-sm" data-move-status="${esc(t.id)}" data-to="IN_PROGRESS" title="Mover a En Curso">▶ Iniciar</button>` : ""}
+            ${t.status === "IN_PROGRESS" ? `<button class="btn-sm" data-move-status="${esc(t.id)}" data-to="COMPLETED" title="Marcar como Completada">✓ Listo</button>` : ""}
+            ${t.status === "COMPLETED" ? `<button class="btn-sm" data-move-status="${esc(t.id)}" data-to="PENDING" title="Reabrir">↺ Reabrir</button>` : ""}
+          </div>
+        </div>
+      </div>
+    `;
+
+    content.innerHTML = `
+      <div class="radar-toolbar">
+        <div class="radar-filters">
+          <select data-filter-proj style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:var(--r-sm);font-size:12px">
+            <option value="">Todos los Proyectos</option>
+            ${projects.map((p) => `<option value="${esc(p.Name)}" ${rf.project === p.Name ? "selected" : ""}>${esc(p.Name)}</option>`).join("")}
+          </select>
+          <select data-filter-prio style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:var(--r-sm);font-size:12px">
+            <option value="">Todas las Prioridades</option>
+            <option value="HIGH" ${rf.priority === "HIGH" ? "selected" : ""}>HIGH</option>
+            <option value="MEDIUM" ${rf.priority === "MEDIUM" ? "selected" : ""}>MEDIUM</option>
+            <option value="LOW" ${rf.priority === "LOW" ? "selected" : ""}>LOW</option>
+          </select>
+          <select data-filter-cat style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:var(--r-sm);font-size:12px">
+            <option value="">Todas las Categorías</option>
+            <option value="FEATURE" ${rf.category === "FEATURE" ? "selected" : ""}>FEATURE</option>
+            <option value="BUGFIX" ${rf.category === "BUGFIX" ? "selected" : ""}>BUGFIX</option>
+            <option value="REFACTOR" ${rf.category === "REFACTOR" ? "selected" : ""}>REFACTOR</option>
+            <option value="IDEA" ${rf.category === "IDEA" ? "selected" : ""}>IDEA</option>
+          </select>
+        </div>
+        <button class="btn" data-new-task style="background:var(--accent);color:var(--app);font-weight:600">
+          + Nueva Tarea
+        </button>
+      </div>
+
+      <div class="radar-board">
+        <div class="radar-col">
+          <div class="radar-col-head">
+            <span class="radar-col-title" style="color:var(--warning)">⚡ En Curso</span>
+            <span class="radar-col-count">${inProgress.length}</span>
+          </div>
+          ${inProgress.map(renderCard).join("") || `<p class="sheet-note" style="text-align:center;padding:24px 0">Sin tareas en curso</p>`}
+        </div>
+
+        <div class="radar-col">
+          <div class="radar-col-head">
+            <span class="radar-col-title" style="color:var(--text-secondary)">📋 Pendientes / Backlog</span>
+            <span class="radar-col-count">${pending.length}</span>
+          </div>
+          ${pending.map(renderCard).join("") || `<p class="sheet-note" style="text-align:center;padding:24px 0">Sin tareas pendientes</p>`}
+        </div>
+
+        <div class="radar-col">
+          <div class="radar-col-head">
+            <span class="radar-col-title" style="color:var(--success)">✓ Completadas</span>
+            <span class="radar-col-count">${completed.length}</span>
+          </div>
+          ${completed.map(renderCard).join("") || `<p class="sheet-note" style="text-align:center;padding:24px 0">Sin tareas completadas</p>`}
+        </div>
+      </div>
+    `;
+
+    $("[data-filter-proj]", content).addEventListener("change", (e) => {
+      rf.project = e.target.value;
+      loadRadar();
+    });
+    $("[data-filter-prio]", content).addEventListener("change", (e) => {
+      rf.priority = e.target.value;
+      loadRadar();
+    });
+    $("[data-filter-cat]", content).addEventListener("change", (e) => {
+      rf.category = e.target.value;
+      loadRadar();
+    });
+    $("[data-new-task]", content).addEventListener("click", () => openNewTaskModal());
+
+    $$("[data-move-status]", content).forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.moveStatus;
+        const nextStatus = btn.dataset.to;
+        try {
+          await api(`/api/radar/tasks/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            body: { status: nextStatus },
+          });
+          toast(`Tarea actualizada a ${nextStatus}`, "ok");
+          loadRadar();
+        } catch (err) {
+          toast(err.message, "error");
+        }
+      });
+    });
+
+    $$("[data-task-id]", content).forEach((card) => {
+      card.addEventListener("click", (e) => {
+        if (e.target.closest("button")) return;
+        openRadarTaskDrawer(card.dataset.taskId);
+      });
+    });
+
+    $$("[data-goto-session]", content).forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setView("sessions");
+        openTimeline(btn.dataset.gotoSession);
+      });
+    });
+  }
+
+  async function openRadarTaskDrawer(id) {
+    try {
+      const task = await api(`/api/radar/tasks/${encodeURIComponent(id)}`);
+      state.radarTask = task;
+
+      $("[data-drawer-ref]").textContent = `#${task.id} · ${task.project}`;
+      $("[data-drawer-title]").textContent = task.title;
+
+      const notesHtml = (task.notes || []).map((n) => `
+        <div style="background:var(--elevated);padding:8px 12px;border-radius:var(--r-sm);border:1px solid var(--border);margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:4px">
+            <strong style="color:var(--text)">${esc(n.author)}</strong>
+            <span class="mono">${esc(fmtDate(n.created_at))}</span>
+          </div>
+          <p style="font-size:12.5px;color:var(--text-secondary);line-height:1.4">${esc(n.content)}</p>
+        </div>
+      `).join("") || `<p class="sheet-note">Sin notas aún.</p>`;
+
+      $("[data-drawer-body]").innerHTML = `
+        <div class="edit-form">
+          <div class="form-row">
+            <label for="rt-title">Título</label>
+            <input id="rt-title" type="text" value="${esc(task.title)}">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)">
+            <div class="form-row">
+              <label for="rt-status">Estado</label>
+              <select id="rt-status">
+                <option value="PENDING" ${task.status === "PENDING" ? "selected" : ""}>PENDING</option>
+                <option value="IN_PROGRESS" ${task.status === "IN_PROGRESS" ? "selected" : ""}>IN_PROGRESS</option>
+                <option value="COMPLETED" ${task.status === "COMPLETED" ? "selected" : ""}>COMPLETED</option>
+                <option value="DEFERRED" ${task.status === "DEFERRED" ? "selected" : ""}>DEFERRED</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="rt-priority">Prioridad</label>
+              <select id="rt-priority">
+                <option value="HIGH" ${task.priority === "HIGH" ? "selected" : ""}>HIGH</option>
+                <option value="MEDIUM" ${task.priority === "MEDIUM" ? "selected" : ""}>MEDIUM</option>
+                <option value="LOW" ${task.priority === "LOW" ? "selected" : ""}>LOW</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <label for="rt-desc">Descripción</label>
+            <textarea id="rt-desc" rows="4">${esc(task.description || "")}</textarea>
+          </div>
+          ${task.origin_session_id ? `
+            <div class="form-row">
+              <label>Sesión de Origen</label>
+              <div><button class="link mono" id="rt-goto-origin">${esc(task.origin_session_id)}</button></div>
+            </div>
+          ` : ""}
+          <div style="margin-top:var(--s4);border-top:1px solid var(--border);padding-top:var(--s3)">
+            <h3 class="panel-title" style="margin-bottom:var(--s2)">Notas y Comentarios</h3>
+            <div id="rt-notes-list">${notesHtml}</div>
+            <div style="display:flex;gap:var(--s2);margin-top:var(--s3)">
+              <input id="rt-new-note" type="text" placeholder="Escribir una nota rápida…" style="flex:1;background:var(--elevated);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text);padding:6px 10px;font-size:12.5px">
+              <button class="btn" id="rt-add-note">Añadir</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      $("[data-drawer-foot]").innerHTML = `
+        <button class="btn" id="rt-save" style="background:var(--accent);color:var(--app);font-weight:600">Guardar Cambios</button>
+        <button class="btn" id="rt-delete" style="color:var(--danger)">Eliminar Tarea</button>
+      `;
+
+      drawer.hidden = false;
+      backdrop.hidden = false;
+
+      $("#rt-goto-origin")?.addEventListener("click", () => {
+        closeDrawer();
+        setView("sessions");
+        openTimeline(task.origin_session_id);
+      });
+
+      $("#rt-save").addEventListener("click", async () => {
+        try {
+          await api(`/api/radar/tasks/${encodeURIComponent(task.id)}`, {
+            method: "PATCH",
+            body: {
+              title: $("#rt-title").value.trim(),
+              status: $("#rt-status").value,
+              priority: $("#rt-priority").value,
+              description: $("#rt-desc").value.trim(),
+            },
+          });
+          toast("Tarea guardada", "ok");
+          closeDrawer();
+          loadRadar();
+        } catch (err) {
+          toast(err.message, "error");
+        }
+      });
+
+      $("#rt-delete").addEventListener("click", async () => {
+        if (!confirm("¿Eliminar esta tarea de forma permanente?")) return;
+        try {
+          await api(`/api/radar/tasks/${encodeURIComponent(task.id)}`, { method: "DELETE" });
+          toast("Tarea eliminada", "ok");
+          closeDrawer();
+          loadRadar();
+        } catch (err) {
+          toast(err.message, "error");
+        }
+      });
+
+      $("#rt-add-note").addEventListener("click", async () => {
+        const input = $("#rt-new-note");
+        const val = input.value.trim();
+        if (!val) return;
+        try {
+          await api(`/api/radar/tasks/${encodeURIComponent(task.id)}/notes`, {
+            method: "POST",
+            body: { author: "user", content: val },
+          });
+          toast("Nota agregada", "ok");
+          openRadarTaskDrawer(task.id);
+        } catch (err) {
+          toast(err.message, "error");
+        }
+      });
+    } catch (err) {
+      toast(`No se pudo abrir la tarea: ${err.message}`, "error");
+    }
+  }
+
+  function openNewTaskModal() {
+    $("[data-drawer-ref]").textContent = "Action Radar";
+    $("[data-drawer-title]").textContent = "Nueva Tarea";
+
+    const projects = state.projectsList || state.overview?.projects || [];
+
+    $("[data-drawer-body]").innerHTML = `
+      <div class="edit-form">
+        <div class="form-row">
+          <label for="new-t-title">Título *</label>
+          <input id="new-t-title" type="text" placeholder="Ej. Refactorizar store..." autofocus>
+        </div>
+        <div class="form-row">
+          <label for="new-t-project">Proyecto</label>
+          <input id="new-t-project" type="text" list="proj-datalist" placeholder="Engram-Manager" value="${esc(state.radar.filter.project || "general")}">
+          <datalist id="proj-datalist">
+            ${projects.map((p) => `<option value="${esc(p.Name)}">`).join("")}
+          </datalist>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)">
+          <div class="form-row">
+            <label for="new-t-cat">Categoría</label>
+            <select id="new-t-cat">
+              <option value="FEATURE">FEATURE</option>
+              <option value="BUGFIX">BUGFIX</option>
+              <option value="REFACTOR">REFACTOR</option>
+              <option value="IDEA">IDEA</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="new-t-prio">Prioridad</label>
+            <select id="new-t-prio">
+              <option value="HIGH">HIGH</option>
+              <option value="MEDIUM" selected>MEDIUM</option>
+              <option value="LOW">LOW</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="new-t-desc">Descripción</label>
+          <textarea id="new-t-desc" rows="4" placeholder="Detalles o contexto de la tarea..."></textarea>
+        </div>
+      </div>
+    `;
+
+    $("[data-drawer-foot]").innerHTML = `
+      <button class="btn" id="new-t-submit" style="background:var(--accent);color:var(--app);font-weight:600">+ Crear Tarea</button>
+      <button class="btn" id="new-t-cancel">Cancelar</button>
+    `;
+
+    drawer.hidden = false;
+    backdrop.hidden = false;
+
+    $("#new-t-cancel").addEventListener("click", closeDrawer);
+    $("#new-t-submit").addEventListener("click", async () => {
+      const title = $("#new-t-title").value.trim();
+      if (!title) {
+        toast("El título es obligatorio", "error");
+        return;
+      }
+      try {
+        await api("/api/radar/tasks", {
+          method: "POST",
+          body: {
+            title,
+            project: $("#new-t-project").value.trim() || "general",
+            category: $("#new-t-cat").value,
+            priority: $("#new-t-prio").value,
+            description: $("#new-t-desc").value.trim(),
+          },
+        });
+        toast("Tarea creada con éxito", "ok");
+        closeDrawer();
+        loadRadar();
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    });
   }
 
   // ---------------------------------------------------------------- review
@@ -894,11 +1399,17 @@
 
   async function loadSystem() {
     const epoch = ++viewEpoch;
-    loading("Inspecting the store…");
+    loading("Inspecting the store and host system…");
     try {
-      const data = await api("/api/health");
+      const [data, terminals, projectsData] = await Promise.all([
+        api("/api/health"),
+        api("/api/system/terminals").catch(() => null),
+        api("/api/projects").catch(() => null),
+      ]);
       if (epoch !== viewEpoch) return;
       state.health = data;
+      state.terminals = terminals;
+      state.projectsWithGit = projectsData?.projects || [];
       renderSystem();
     } catch (err) {
       if (epoch !== viewEpoch) return;
@@ -910,6 +1421,8 @@
     const data = state.health;
     const h = data.health || {};
     const emb = data.embeddings || {};
+    const terms = state.terminals || { herdr: { available: false, agents: [] }, processes: [] };
+    const projects = state.projectsWithGit || [];
 
     const invariants = [
       ["Live memories", num(h.LiveObservations), null],
@@ -957,9 +1470,10 @@
           <div class="panel-head"><h2 class="panel-title">Storage & wiring</h2></div>
           <div class="typebars">
             ${[
-              ["Database", bytes(data.db_size), null],
-              ["WAL", bytes(data.wal_size), null],
+              ["Engram DB", bytes(data.db_size), null],
+              ["Engram WAL", bytes(data.wal_size), null],
               ["Read path", "sqlite mode=ro", null],
+              ["Radar DB", "radar.db mode=rw", null],
               ["Write path", data.api_status === "connected" ? "engram serve" : `engram serve (${data.api_status})`, data.api_status !== "connected"],
               ["Auto-embedder", "engram-embed-watch", null],
             ].map(([label, value, bad]) => `
@@ -967,6 +1481,59 @@
                 <span class="typebar-label"><b>${esc(label)}</b></span>
                 <span class="typebar-num" style="color:${bad ? "var(--pending)" : "var(--fg)"}">${esc(value)}</span>
               </div>`).join("")}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Agentes & Terminales</h2>
+            <span class="panel-note">${terms.processes ? terms.processes.length : 0} procesos activos</span>
+          </div>
+          <div class="typebars">
+            <div class="typebar typebar-kv" aria-disabled="true">
+              <span class="typebar-label"><b>Herdr socket</b></span>
+              <span class="typebar-num" style="color:${terms.herdr?.available ? 'var(--healthy)' : 'var(--fg-mute)'}">${terms.herdr?.available ? "conectado" : "ausente"}</span>
+            </div>
+            ${(terms.processes || []).map((p) => `
+              <div class="typebar typebar-kv" aria-disabled="true">
+                <span class="typebar-label"><strong style="color:var(--accent)">PID ${p.pid}</strong> · ${esc(p.name)}</span>
+                <span class="typebar-num mono" style="font-size:11px;color:var(--text-secondary);max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(p.command)}</span>
+              </div>
+            `).join("") || `<p class="sheet-note" style="padding:8px 0">Ningún proceso de agente en ejecución</p>`}
+          </div>
+        </section>
+
+        <section class="panel" style="grid-column:1 / -1">
+          <div class="panel-head">
+            <h2 class="panel-title">Salud del Portafolio Git</h2>
+            <span class="panel-note">${projects.length} proyectos registrados</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Proyecto</th>
+                  <th>Rama</th>
+                  <th>Estado Working Tree</th>
+                  <th>Último Commit</th>
+                  <th style="text-align:right">Memorias</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${projects.map((p) => {
+                  const g = p.git;
+                  return `
+                    <tr>
+                      <td class="strong">${esc(p.Name)}</td>
+                      <td class="mono" style="font-size:11.5px">${g && g.is_repo ? `<span class="chip">${esc(g.branch || '—')}</span>` : '—'}</td>
+                      <td>${g && g.is_repo ? (g.is_clean ? `<span class="tag tag-live">✓ limpio</span>` : `<span class="tag tag-conflict">⚡ dirty (${g.dirty_count})</span>`) : '<span class="tag tag-closed">no git</span>'}</td>
+                      <td class="mono" style="font-size:11.5px;color:var(--text-secondary)">${g && g.last_commit ? `${esc(g.last_commit)} · ${esc(g.commit_time || '')}` : '—'}</td>
+                      <td style="text-align:right" class="mono">${num(p.Observations)}</td>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
           </div>
         </section>
       </div>
@@ -1136,6 +1703,7 @@
 
   const VIEWS = {
     overview: { title: "Overview", sub: "Shape, mix and momentum of the memory store", load: loadOverview, tools: true },
+    radar: { title: "Action Radar", sub: "Backlog y tareas de seguimiento vinculadas a sesiones de IA", load: loadRadar },
     memories: { title: "Memories", sub: "Search, filter and manage observations", load: loadMemories },
     relations: { title: "Relations", sub: "Judged links between memories, and what is still unjudged", load: loadRelations },
     sessions: { title: "Sessions", sub: "Agent runs and the timeline each one produced", load: loadSessions },
@@ -1167,27 +1735,30 @@
       state.health = data;
       const up = data.api_status === "connected";
       dot.className = `dot ${up ? "dot-up" : "dot-down"}`;
-      label.textContent = up ? "engram serve connected" : "engram serve offline";
+      label.textContent = up ? "engram serve" : "engram offline";
       label.className = "engine-text";
       label.style.color = up ? "var(--healthy)" : "var(--conflict)";
-      $("[data-db-size]").textContent = `db ${bytes(data.db_size)}`;
-      const walChip = $("[data-wal-size]");
-      walChip.textContent = `wal ${bytes(data.wal_size)}`;
-      // The WAL is where unmerged writes live; when it approaches the database
-      // its size stops being trivia. The ratio is stated, not implied.
+      const dbEl = $("[data-db-size]");
+      if (dbEl) dbEl.textContent = bytes(data.db_size);
+      const walEl = $("[data-wal-size]");
+      if (walEl) walEl.textContent = bytes(data.wal_size);
+      const walMetric = $("[data-wal-metric]");
       const walRatio = data.db_size > 0 ? data.wal_size / data.db_size : 0;
-      walChip.dataset.warn = walRatio >= 0.5 ? "true" : "false";
-      walChip.title = data.db_size > 0
-        ? `WAL is ${Math.round(walRatio * 100)}% of the database size`
-        : "";
+      if (walMetric) {
+        walMetric.dataset.warn = walRatio >= 0.5 ? "true" : "false";
+        walMetric.title = data.db_size > 0
+          ? `WAL is ${Math.round(walRatio * 100)}% of the database size`
+          : "";
+      }
       const h = data.health || {};
       $("[data-count='memories']").textContent = num(h.LiveObservations);
       $("[data-count='sessions']").textContent = num(h.TotalSessions);
       $("[data-count='relations']").textContent = num(data.relations);
       $("[data-count='review']").textContent = num(data.review_pending);
+      pollRadarCount();
     } catch {
       dot.className = "dot dot-wait";
-      label.textContent = "manager unreachable";
+      label.textContent = "unreachable";
       label.className = "engine-text";
       label.style.color = "var(--pending)";
     }
@@ -1229,7 +1800,64 @@
     if (e.key === "r" && !e.metaKey && !e.ctrlKey) { VIEWS[state.view].load(); pollHealth(); }
   });
 
+  async function pollRadarCount() {
+    try {
+      const data = await api("/api/radar/tasks?status=PENDING&limit=1");
+      const badge = $("[data-count='radar']");
+      if (badge) badge.textContent = num(data.total || 0);
+    } catch {
+      // ignore
+    }
+  }
+
+  function initSSE() {
+    const liveBadge = $("[data-live-status]");
+    let es;
+    try {
+      es = new EventSource("/api/stream");
+    } catch {
+      if (liveBadge) liveBadge.dataset.active = "false";
+      return;
+    }
+
+    es.onopen = () => {
+      if (liveBadge) {
+        liveBadge.dataset.active = "true";
+        liveBadge.title = "Real-time SSE active";
+      }
+    };
+
+    es.onerror = () => {
+      if (liveBadge) {
+        liveBadge.dataset.active = "false";
+        liveBadge.title = "SSE reconnecting…";
+      }
+    };
+
+    es.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "engram-mutation") {
+          pollHealth();
+          if (state.view === "overview" || state.view === "memories" || state.view === "sessions") {
+            VIEWS[state.view].load();
+          }
+        } else if (msg.type === "radar-mutation") {
+          pollRadarCount();
+          if (state.view === "radar") {
+            loadRadar();
+          } else if (state.view === "sessions" && state.timeline) {
+            openTimeline(state.timeline.session_id);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+  }
+
   pollHealth();
+  initSSE();
   setView("overview");
   setInterval(pollHealth, 20000);
 })();
