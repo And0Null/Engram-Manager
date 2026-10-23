@@ -21,6 +21,11 @@
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
           <span>Overview</span>
         </button>
+        <button class="nav-item" data-view="radar">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/></svg>
+          <span>Action Radar</span>
+          <span class="nav-count" data-count="radar">—</span>
+        </button>
         <button class="nav-item" data-view="memories">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
           <span>Memories</span>
@@ -48,13 +53,24 @@
       </nav>
 
       <div class="sidebar-foot">
-        <div class="engine">
-          <span class="dot dot-wait" data-engine-dot></span>
-          <span class="engine-text" data-engine-label>connecting…</span>
+        <div class="engine-row">
+          <div class="engine-status">
+            <span class="dot dot-wait" data-engine-dot></span>
+            <span class="engine-text" data-engine-label>connecting…</span>
+          </div>
+          <span class="live-badge" data-live-status title="Real-time SSE active">
+            <span class="live-dot"></span>LIVE
+          </span>
         </div>
-        <div class="foot-meta">
-          <span class="foot-chip" data-db-size>db —</span>
-          <span class="foot-chip" data-wal-size>wal —</span>
+        <div class="foot-metrics">
+          <div class="foot-metric">
+            <span class="metric-tag">DB</span>
+            <span class="metric-val mono" data-db-size>—</span>
+          </div>
+          <div class="foot-metric" data-wal-metric>
+            <span class="metric-tag">WAL</span>
+            <span class="metric-val mono" data-wal-size>—</span>
+          </div>
         </div>
       </div>
     </aside>

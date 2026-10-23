@@ -22,6 +22,7 @@ import (
 
 	"engram-manager/internal/api"
 	"engram-manager/internal/cli"
+	"engram-manager/internal/radar"
 	"engram-manager/internal/store"
 	"engram-manager/internal/tui"
 	"engram-manager/internal/web"
@@ -45,9 +46,10 @@ Flags:
 
 func main() {
 	var (
-		dbPath  string
-		apiAddr string
-		webAddr string
+		dbPath    string
+		radarPath string
+		apiAddr   string
+		webAddr   string
 	)
 
 	defaultWeb := "127.0.0.1:7438"
@@ -58,6 +60,7 @@ func main() {
 	}
 
 	flag.StringVar(&dbPath, "db", store.DefaultPath, "path to engram.db")
+	flag.StringVar(&radarPath, "radar", radar.DefaultPath, "path to radar.db")
 	flag.StringVar(&apiAddr, "api", api.DefaultAddr, "address of `engram serve`, for writes")
 	flag.StringVar(&webAddr, "addr", defaultWeb, "address for web dashboard (engram-manager web)")
 	flag.Usage = usage
@@ -114,7 +117,14 @@ func main() {
 		}
 
 		client := api.New(apiAddr)
-		srv, err := web.NewServer(st, client)
+		rd, err := radar.Open(radarPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "engram-manager web radar: %v\n", err)
+			os.Exit(1)
+		}
+		defer rd.Close()
+
+		srv, err := web.NewServer(st, client, rd)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "engram-manager web: %v\n", err)
 			os.Exit(1)
@@ -134,6 +144,7 @@ func main() {
 		go func() {
 			fmt.Printf("Engram Manager Web Dashboard listening on http://%s\n", webAddr)
 			fmt.Printf("Database: %s (mode=ro)\n", st.Path())
+			fmt.Printf("Radar DB: %s (mode=rw)\n", rd.Path())
 			fmt.Printf("API backend: %s\n", apiAddr)
 			fmt.Println("Press Ctrl+C to stop.")
 			if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

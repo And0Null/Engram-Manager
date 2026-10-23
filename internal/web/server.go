@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -12,7 +13,9 @@ import (
 	"time"
 
 	"engram-manager/internal/api"
+	"engram-manager/internal/radar"
 	"engram-manager/internal/store"
+	"engram-manager/internal/system"
 )
 
 //go:embed static/*
@@ -22,14 +25,29 @@ var embeddedFiles embed.FS
 type Server struct {
 	store  *store.Store
 	client *api.Client
+	radar  *radar.Store
+	broker *Broker
 	mux    *http.ServeMux
 }
 
 // NewServer returns an initialized web dashboard server.
-func NewServer(st *store.Store, cl *api.Client) (*Server, error) {
+func NewServer(st *store.Store, cl *api.Client, rd *radar.Store) (*Server, error) {
+	if rd == nil {
+		var err error
+		rd, err = radar.Open(radar.DefaultPath)
+		if err != nil {
+			memDB, _ := sql.Open("sqlite", "file::memory:?_pragma=foreign_keys(1)")
+			rd, _ = radar.NewForTest(memDB)
+		}
+	}
+	b := NewBroker(st.Path())
+	b.Start()
+
 	s := &Server{
 		store:  st,
 		client: cl,
+		radar:  rd,
+		broker: b,
 		mux:    http.NewServeMux(),
 	}
 	s.registerRoutes()
@@ -58,6 +76,21 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/sessions/{id}/timeline", s.handleSessionTimeline)
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /api/review-queue", s.handleReviewQueue)
+
+	// Radar routes
+	s.mux.HandleFunc("GET /api/radar/tasks", s.handleListRadarTasks)
+	s.mux.HandleFunc("POST /api/radar/tasks", s.handleCreateRadarTask)
+	s.mux.HandleFunc("GET /api/radar/tasks/{id}", s.handleGetRadarTask)
+	s.mux.HandleFunc("PATCH /api/radar/tasks/{id}", s.handleUpdateRadarTask)
+	s.mux.HandleFunc("DELETE /api/radar/tasks/{id}", s.handleDeleteRadarTask)
+	s.mux.HandleFunc("POST /api/radar/tasks/{id}/notes", s.handleAddRadarTaskNote)
+	s.mux.HandleFunc("DELETE /api/radar/notes/{id}", s.handleDeleteRadarNote)
+
+	// System and terminal routes
+	s.mux.HandleFunc("GET /api/system/terminals", s.handleSystemTerminals)
+
+	// Live SSE stream
+	s.mux.HandleFunc("GET /api/stream", s.broker.ServeHTTP)
 
 	// Static assets
 	sub, err := fs.Sub(embeddedFiles, "static")
@@ -215,6 +248,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"relations":  relSum,
 		"projects":   projects,
 		"embeddings": emb,
+		"terminals":  system.InspectTerminals(),
 		"daily":      daily,
 		"hourly":     hourly,
 		"types_all":  typesAll,
@@ -489,6 +523,12 @@ func (s *Server) handleSessionTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session, err := s.store.SessionByID(sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	timeline, err := s.store.SessionTimeline(sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -503,11 +543,45 @@ func (s *Server) handleSessionTimeline(w http.ResponseWriter, r *http.Request) {
 		prompts = []store.Prompt{}
 	}
 
+	var summaryRaw string
+	if session != nil && strings.TrimSpace(session.Summary) != "" {
+		summaryRaw = session.Summary
+	}
+	if summaryRaw == "" {
+		for _, obs := range timeline {
+			if obs.Type == "session_summary" && strings.TrimSpace(obs.Content) != "" {
+				summaryRaw = obs.Content
+				break
+			}
+		}
+	}
+
+	parsedSummary := store.ParseSessionSummary(summaryRaw)
+
+	var relatedTasks []radar.Task
+	if s.radar != nil {
+		tasks, _, err := s.radar.GetTasks(r.Context(), radar.TaskFilter{OriginSessionID: sessionID})
+		if err == nil && tasks != nil {
+			relatedTasks = tasks
+		}
+	}
+	if relatedTasks == nil {
+		relatedTasks = []radar.Task{}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id":   sessionID,
-		"observations": timeline,
-		"prompts":      prompts,
+		"session_id":     sessionID,
+		"session":        session,
+		"observations":   timeline,
+		"prompts":        prompts,
+		"parsed_summary": parsedSummary,
+		"related_tasks":  relatedTasks,
 	})
+}
+
+type ProjectWithGit struct {
+	store.ProjectStats
+	Git *system.GitRepoHealth `json:"git,omitempty"`
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
@@ -520,10 +594,30 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		projects = []store.ProjectStats{}
 	}
 
+	enriched := make([]ProjectWithGit, 0, len(projects))
+	for _, p := range projects {
+		pwg := ProjectWithGit{ProjectStats: p}
+		for _, dir := range p.Directories {
+			if dir != "" {
+				gh := system.InspectGitRepo(dir)
+				if gh.IsRepo {
+					pwg.Git = &gh
+					break
+				}
+			}
+		}
+		enriched = append(enriched, pwg)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"projects": projects,
-		"count":    len(projects),
+		"projects": enriched,
+		"count":    len(enriched),
 	})
+}
+
+func (s *Server) handleSystemTerminals(w http.ResponseWriter, r *http.Request) {
+	status := system.InspectTerminals()
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) handleReviewQueue(w http.ResponseWriter, r *http.Request) {
@@ -551,4 +645,139 @@ func (s *Server) handleReviewQueue(w http.ResponseWriter, r *http.Request) {
 		"count": len(queue),
 		"total": total,
 	})
+}
+
+func (s *Server) handleListRadarTasks(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := radar.TaskFilter{
+		Project:         q.Get("project"),
+		Status:          q.Get("status"),
+		Priority:        q.Get("priority"),
+		Category:        q.Get("category"),
+		OriginSessionID: q.Get("origin_session_id"),
+		Search:          q.Get("q"),
+	}
+	if l, err := strconv.Atoi(q.Get("limit")); err == nil && l > 0 {
+		f.Limit = l
+	}
+	if off, err := strconv.Atoi(q.Get("offset")); err == nil && off >= 0 {
+		f.Offset = off
+	}
+
+	tasks, total, err := s.radar.GetTasks(r.Context(), f)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tasks": tasks,
+		"total": total,
+	})
+}
+
+func (s *Server) handleCreateRadarTask(w http.ResponseWriter, r *http.Request) {
+	var in radar.CreateTaskInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	task, err := s.radar.CreateTask(r.Context(), in)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if s.broker != nil {
+		s.broker.Broadcast("radar-mutation", map[string]any{"action": "create", "id": task.ID})
+	}
+	writeJSON(w, http.StatusCreated, task)
+}
+
+func (s *Server) handleGetRadarTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	task, err := s.radar.GetTaskByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, radar.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (s *Server) handleUpdateRadarTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var in radar.UpdateTaskInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	task, err := s.radar.UpdateTask(r.Context(), id, in)
+	if err != nil {
+		if errors.Is(err, radar.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if s.broker != nil {
+		s.broker.Broadcast("radar-mutation", map[string]any{"action": "update", "id": task.ID})
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (s *Server) handleDeleteRadarTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.radar.DeleteTask(r.Context(), id); err != nil {
+		if errors.Is(err, radar.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if s.broker != nil {
+		s.broker.Broadcast("radar-mutation", map[string]any{"action": "delete", "id": id})
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleAddRadarTaskNote(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Author  string `json:"author"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	note, err := s.radar.AddNote(r.Context(), id, req.Author, req.Content)
+	if err != nil {
+		if errors.Is(err, radar.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if s.broker != nil {
+		s.broker.Broadcast("radar-mutation", map[string]any{"action": "add-note", "task_id": id})
+	}
+	writeJSON(w, http.StatusCreated, note)
+}
+
+func (s *Server) handleDeleteRadarNote(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.radar.DeleteNote(r.Context(), id); err != nil {
+		if errors.Is(err, radar.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "note not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

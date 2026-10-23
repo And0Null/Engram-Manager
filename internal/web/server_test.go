@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"engram-manager/internal/store"
@@ -112,7 +113,7 @@ func TestOverviewPayloadCarriesHourlySeries(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	srv, err := NewServer(st, nil)
+	srv, err := NewServer(st, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestServerEndpoints(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	srv, err := NewServer(st, nil)
+	srv, err := NewServer(st, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -273,6 +274,17 @@ func TestServerEndpoints(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("session timeline status = %d, want 200", res.StatusCode)
 	}
+	var timelineResp struct {
+		SessionID     string              `json:"session_id"`
+		ParsedSummary store.ParsedSummary `json:"parsed_summary"`
+		RelatedTasks  []any               `json:"related_tasks"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&timelineResp); err != nil {
+		t.Fatalf("decode timeline: %v", err)
+	}
+	if timelineResp.SessionID != "s1" {
+		t.Errorf("expected session_id s1, got %s", timelineResp.SessionID)
+	}
 
 	// 8. GET /api/review-queue
 	res, err = http.Get(ts.URL + "/api/review-queue")
@@ -281,6 +293,15 @@ func TestServerEndpoints(t *testing.T) {
 	}
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("review queue status = %d, want 200", res.StatusCode)
+	}
+
+	// 8b. GET /api/system/terminals
+	res, err = http.Get(ts.URL + "/api/system/terminals")
+	if err != nil {
+		t.Fatalf("GET /api/system/terminals: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("system terminals status = %d, want 200", res.StatusCode)
 	}
 	var reviewResp struct {
 		Queue []store.Observation `json:"queue"`
@@ -301,5 +322,119 @@ func TestServerEndpoints(t *testing.T) {
 	}
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("static index status = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestRadarEndpoints(t *testing.T) {
+	st := createTestStore(t)
+	defer st.Close()
+
+	srv, err := NewServer(st, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 1. POST /api/radar/tasks
+	createPayload := `{"project":"Engram-Manager","title":"Build Live SSE","priority":"HIGH","category":"FEATURE"}`
+	res, err := http.Post(ts.URL+"/api/radar/tasks", "application/json", strings.NewReader(createPayload))
+	if err != nil {
+		t.Fatalf("POST /api/radar/tasks: %v", err)
+	}
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("POST status = %d, want 201", res.StatusCode)
+	}
+
+	var created struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Priority string `json:"priority"`
+		Status   string `json:"status"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.ID == "" || created.Title != "Build Live SSE" {
+		t.Fatalf("unexpected created task: %+v", created)
+	}
+
+	// 2. GET /api/radar/tasks
+	res, err = http.Get(ts.URL + "/api/radar/tasks?project=Engram-Manager")
+	if err != nil {
+		t.Fatalf("GET /api/radar/tasks: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200", res.StatusCode)
+	}
+	var listResp struct {
+		Tasks []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"tasks"`
+		Total int `json:"total"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if listResp.Total != 1 || len(listResp.Tasks) != 1 {
+		t.Fatalf("expected 1 task in list, got total=%d len=%d", listResp.Total, len(listResp.Tasks))
+	}
+
+	// 3. GET /api/radar/tasks/{id}
+	res, err = http.Get(ts.URL + "/api/radar/tasks/" + created.ID)
+	if err != nil {
+		t.Fatalf("GET /api/radar/tasks/{id}: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET task by id status = %d, want 200", res.StatusCode)
+	}
+
+	// 4. PATCH /api/radar/tasks/{id}
+	req, _ := http.NewRequest("PATCH", ts.URL+"/api/radar/tasks/"+created.ID, strings.NewReader(`{"status":"IN_PROGRESS"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /api/radar/tasks/{id}: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want 200", res.StatusCode)
+	}
+
+	// 5. POST /api/radar/tasks/{id}/notes
+	res, err = http.Post(ts.URL+"/api/radar/tasks/"+created.ID+"/notes", "application/json", strings.NewReader(`{"author":"dev","content":"Step 1 complete"}`))
+	if err != nil {
+		t.Fatalf("POST note: %v", err)
+	}
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("POST note status = %d, want 201", res.StatusCode)
+	}
+	var noteResp struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&noteResp)
+	if noteResp.ID == "" {
+		t.Fatalf("expected note ID")
+	}
+
+	// 6. DELETE /api/radar/notes/{id}
+	req, _ = http.NewRequest("DELETE", ts.URL+"/api/radar/notes/"+noteResp.ID, nil)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE note: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE note status = %d, want 200", res.StatusCode)
+	}
+
+	// 7. DELETE /api/radar/tasks/{id}
+	req, _ = http.NewRequest("DELETE", ts.URL+"/api/radar/tasks/"+created.ID, nil)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE task: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE task status = %d, want 200", res.StatusCode)
 	}
 }
